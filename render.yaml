@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: push-to-talk-app
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    branch: main
+    autoDeploy: true
