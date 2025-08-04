@@ -13,10 +13,9 @@
 1. Click the "Deploy to Render" button above.
 2. Connect your GitHub account and select the repo.
 3. Render will build and host your backend automatically.
-4. The app connects to the deployed server automatically via `window.location.origin`.
 
 ## Local Setup
 ```
-npm install express socket.io
+npm install
 node server.js
 ```

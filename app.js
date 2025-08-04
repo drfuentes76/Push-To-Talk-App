@@ -1,5 +1,4 @@
-// Client-side script with auto-detection for Render
-const socket = io(window.location.origin);
+const socket = io("https://push-to-talk-app.onrender.com");
 
 const joinBtn = document.getElementById('joinBtn');
 const nicknameInput = document.getElementById('nickname');
@@ -23,7 +22,6 @@ pushToTalkBtn.addEventListener('mousedown', async () => {
   if (!localStream) {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   }
-  // Audio streaming logic would go here
 });
 
 pushToTalkBtn.addEventListener('mouseup', () => {
