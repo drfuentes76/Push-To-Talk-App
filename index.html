@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Push-to-Talk App</title>
+  <title>Push-to-Talk App (Debug Mode)</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -39,10 +39,7 @@
       <div id="map" style="width:100%;height:300px;"></div>
     </div>
   </div>
-  <audio id="chirpSound" src="chirp.mp3" preload="auto"></audio>
-  <audio id="msgSound" src="message.mp3" preload="auto"></audio>
-  <audio id="fileSound" src="file.mp3" preload="auto"></audio>
-  <audio id="emergencySound" src="emergency.mp3" preload="auto"></audio>
+  <div id="statusLog" style="position:fixed;bottom:0;left:0;width:100%;background:#000;color:#0f0;padding:4px;font-size:12px;font-family:monospace;"></div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
 </body>
