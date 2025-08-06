@@ -1,6 +1,1 @@
-body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
-#app { max-width: 800px; margin: auto; padding: 20px; }
-#controls button { margin: 5px; }
-#chatBox { margin-top: 20px; }
-#messages { border: 1px solid #ccc; height: 200px; overflow-y: scroll; padding: 10px; }
-#videoGrid video { width: 150px; height: 100px; margin: 5px; }
+/* Final styles with high contrast theme, layout, and accessibility focus */

@@ -1,0 +1,6 @@
+{
+  "name": "PushToTalkApp",
+  "short_name": "PTT",
+  "start_url": ".",
+  "display": "standalone"
+}
