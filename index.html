@@ -1,46 +1,26 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Push-to-Talk App (Debug Mode)</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>Push-to-Talk App</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app">
-    <h1>Push-to-Talk App</h1>
-    <div id="login">
-      <input type="text" id="nickname" placeholder="Enter your nickname" />
-      <button id="joinBtn">Join</button>
-    </div>
-    <div id="chatUI" style="display:none;">
-      <div id="controls">
-        <button id="pushToTalkBtn">🎤 Push to Talk</button>
-        <button id="recordVoiceNoteBtn">🎙️ Record Voice Note</button>
-        <button id="sendFileBtn">📂 Send File</button>
-        <button id="sendMediaBtn">🖼️ Send Media</button>
-        <button id="shareLocationBtn">📍 Share Location</button>
-        <button id="startVideoBtn">📹 Start Video</button>
-        <button id="emergencyTrackBtn">🚨 Emergency Track</button>
-        <button id="dndToggleBtn">🔕 Do Not Disturb</button>
-        <button id="createRoomBtn">➕ Create Room</button>
-      </div>
-      <div id="usersList">
-        <h3>Connected Users</h3>
-        <ul id="userListUl"></ul>
-      </div>
-      <div id="chatBox">
-        <h3>Messages</h3>
-        <div id="messages"></div>
-        <input type="text" id="messageInput" placeholder="Type a message" />
-        <button id="sendMsgBtn">Send</button>
-      </div>
-      <div id="videoGrid"></div>
-      <div id="map" style="width:100%;height:300px;"></div>
-    </div>
+  <h1>Push-to-Talk App</h1>
+  <input type="text" id="nickname" placeholder="Enter your nickname">
+  <button onclick="join()">Join</button>
+  <div id="controls" style="display:none;">
+    <button onclick="pushToTalk()">Push to Talk</button>
+    <button onclick="recordVoiceNote()">Record Voice Note</button>
+    <button onclick="sendFile()">Send File</button>
+    <button onclick="shareLocation()">Share Location</button>
+    <button onclick="startVideo()">Start Video</button>
+    <button onclick="emergencyTrack()">Emergency Track</button>
+    <button onclick="toggleDND()">Do Not Disturb</button>
+    <input type="text" id="message" placeholder="Type a message">
+    <button onclick="sendMessage()">Send</button>
+    <div id="chat"></div>
   </div>
-  <div id="statusLog" style="position:fixed;bottom:0;left:0;width:100%;background:#000;color:#0f0;padding:4px;font-size:12px;font-family:monospace;"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="app.js"></script>
+  <script src="client.js"></script>
 </body>
 </html>
