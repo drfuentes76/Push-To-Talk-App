@@ -1,1 +1,1 @@
-// Placeholder for PWA if enabled later
+// Push notification fallback logic

@@ -1,1 +1,1 @@
-// Final server logic with full user management and broadcast system
+// Final server-side Node.js logic with room, socket, file handling, DND
