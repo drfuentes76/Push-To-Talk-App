@@ -1,10 +1,93 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Push-to-Talk App</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Push‑to‑Talk</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Full accessible UI with ARIA, buttons, and live logs -->
+  <header>
+    <h1>Push‑to‑Talk</h1>
+    <div class="right">
+      <label class="hc-toggle">
+        <input type="checkbox" id="highContrast" aria-label="High contrast mode" />
+        High Contrast
+      </label>
+    </div>
+  </header>
+
+  <main>
+    <section id="joinPanel" aria-labelledby="joinHeading">
+      <h2 id="joinHeading">Join Lobby</h2>
+      <form id="joinForm" autocomplete="off">
+        <label for="nickname">Nickname</label>
+        <input id="nickname" type="text" required placeholder="Your name" />
+        <label for="statusSel">Status</label>
+        <select id="statusSel" aria-label="Status">
+          <option value="Online" selected>Online</option>
+          <option value="DND">Do Not Disturb</option>
+        </select>
+        <label for="avatar">Profile picture (optional)</label>
+        <input id="avatar" type="file" accept="image/*" />
+        <button type="submit" class="primary">Join Lobby</button>
+      </form>
+    </section>
+
+    <section id="appPanel" hidden>
+      <aside class="sidebar">
+        <h3>Users</h3>
+        <ul id="userList" aria-live="polite" aria-label="Connected users"></ul>
+        <h3>Rooms</h3>
+        <ul id="roomList" aria-live="polite" aria-label="Active rooms"></ul>
+        <button id="createRoomBtn" class="primary">➕ Create Room</button>
+      </aside>
+
+      <section class="chat">
+        <div class="toolbar">
+          <button id="pttBtn" class="accent" aria-label="Push to talk (hold)">🎤 Hold to Talk</button>
+          <button id="voiceNoteBtn" aria-label="Record voice note">🎙 Voice Note</button>
+          <button id="fileBtn" aria-label="Send file">📎 File</button>
+          <button id="locationBtn" aria-label="Share location">📍 Location</button>
+          <button id="videoBtn" aria-label="Start camera">📹 Video</button>
+          <button id="dndBtn" aria-label="Toggle Do Not Disturb">🔕 DND</button>
+          <span id="scopeBadge" class="badge" aria-live="polite">Lobby</span>
+        </div>
+
+        <div id="log" role="log" aria-live="polite" tabindex="0" class="log"></div>
+
+        <div class="composer">
+          <input id="msgInput" type="text" placeholder="Message…" aria-label="Type a message" />
+          <button id="sendBtn" class="primary">Send</button>
+        </div>
+        <div id="typing" aria-live="polite" class="typing" hidden></div>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="inviteDlg">
+    <form method="dialog">
+      <h3>Create Room</h3>
+      <label for="roomName">Room name</label>
+      <input id="roomName" type="text" required />
+      <label>Select users to invite</label>
+      <div id="inviteList" class="invite-list"></div>
+      <label><input type="checkbox" id="pinRoom" /> Pin room (persist if owner leaves)</label>
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button id="inviteSend" value="default" class="primary">Create & Invite</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <audio id="toneJoin" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg" preload="auto"></audio>
+  <audio id="toneLeave" src="https://actions.google.com/sounds/v1/cartoon/pop.ogg" preload="auto"></audio>
+  <audio id="toneMsg" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+  <audio id="toneFile" src="https://actions.google.com/sounds/v1/cartoon/woodpecker.ogg" preload="auto"></audio>
+  <audio id="tonePTT" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+  <audio id="toneEmergency" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
 </body>
 </html>

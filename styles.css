@@ -1,1 +1,27 @@
-/* High contrast mode, keyboard nav, TTS visibility styles */
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;line-height:1.35;background:#f6f7fb;color:#111}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#111;color:#fff}
+main{padding:12px}
+.primary{background:#2b6cff;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+.accent{background:#10b981;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+.badge{background:#eee;border-radius:999px;padding:4px 10px;margin-left:8px}
+#joinPanel,#appPanel{max-width:1100px;margin:0 auto}
+#joinForm{display:grid;grid-template-columns:1fr;gap:10px;max-width:420px}
+#appPanel{display:grid;grid-template-columns:280px 1fr;gap:12px}
+.sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:70vh;overflow:auto}
+.sidebar ul{list-style:none;margin:6px 0;padding:0}
+.sidebar li{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px}
+.sidebar li .dot{width:10px;height:10px;border-radius:50%}
+.sidebar li img{width:24px;height:24px;border-radius:50%;object-fit:cover;border:1px solid #ddd}
+.sidebar li .name{font-weight:600}
+.chat{display:flex;flex-direction:column;gap:8px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.log{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:55vh;overflow:auto}
+.log .entry{margin-bottom:8px}
+.composer{display:flex;gap:8px}
+.composer input{flex:1;padding:10px;border:1px solid #ccc;border-radius:8px}
+.typing{font-size:.9em;color:#555}
+:root.high-contrast body{background:#000;color:#fff}
+:root.high-contrast .sidebar,:root.high-contrast .log{background:#000;border-color:#fff}
+:root.high-contrast .primary{background:#fff;color:#000}
+.invite-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto;border:1px solid #ddd;border-radius:8px;padding:8px}
+.invite-list label{display:flex;align-items:center;gap:8px}
