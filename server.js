@@ -1,3 +1,4 @@
+// server.js - merged hotfix
 const path = require('path');
 const express = require('express');
 const http = require('http');
@@ -20,6 +21,7 @@ const serializeUsers = () => [...users.values()].map(u => ({ id:u.id, name:u.nam
 const serializeRooms = () => [...rooms.values()].map(r => ({ id:r.id, name:r.name, members:r.members, pinned:r.pinned }));
 
 io.on('connection', (socket) => {
+  console.log('[io] connection', socket.id);
   const ip = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
 
   socket.on('join', ({ name, status, avatar }) => {
@@ -72,7 +74,7 @@ io.on('connection', (socket) => {
     else io.to('lobby').emit('location', payload);
   });
 
-  // Emergency tracking signaling
+  // Emergency signaling
   socket.on('emergency-stream', ({ targetIds = [], action, meta }) => {
     const targets = targetIds.length ? targetIds : Array.from(io.sockets.sockets.keys()).filter(id => id !== socket.id);
     targets.forEach(id => io.to(id).emit('emergency-signal', { from: users.get(socket.id), action, meta }));
@@ -106,7 +108,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('switch-room', ({ roomId }) => {
-    if (!roomId) { // back to lobby
+    if (!roomId) {
       for (const rid of socket.rooms) if (rid !== socket.id) socket.leave(rid);
       socket.join('lobby');
       socket.emit('scope', { type: 'lobby', roomId: null, name: null, url: '/' });

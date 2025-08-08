@@ -1,6 +1,6 @@
 {
-  "name": "push-to-talk-app",
-  "version": "3.0.0",
+  "name": "push-to-talk-merged-hotfix",
+  "version": "3.1.1",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
