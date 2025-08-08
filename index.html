@@ -1,2 +1,200 @@
-<!-- Full working index.html logic will be implemented here -->
-<!-- (Replace placeholder with actual full implementation from prior instructions) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Push-to-Talk</title>
+<style>
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;background:#f6f7fb;color:#111}
+header{padding:12px 16px;background:#111;color:#fff}
+main{padding:12px}
+.primary{background:#2b6cff;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+.accent{background:#10b981;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+.badge{background:#eee;border-radius:999px;padding:4px 10px;margin-left:8px}
+#joinPanel,#appPanel{max-width:1100px;margin:0 auto}
+#joinForm{display:grid;grid-template-columns:1fr;gap:10px;max-width:420px}
+#appPanel{display:grid;grid-template-columns:280px 1fr;gap:12px;margin-top:16px}
+.sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:70vh;overflow:auto}
+.sidebar ul{list-style:none;margin:6px 0;padding:0}
+.sidebar li{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px}
+.sidebar li .dot{width:10px;height:10px;border-radius:50%}
+.sidebar li img{width:24px;height:24px;border-radius:50%;object-fit:cover;border:1px solid #ddd}
+.sidebar li .name{font-weight:600}
+.chat{display:flex;flex-direction:column;gap:8px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.log{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:55vh;overflow:auto}
+.log .entry{margin-bottom:8px}
+.composer{display:flex;gap:8px}
+.composer input{flex:1;padding:10px;border:1px solid #ccc;border-radius:8px}
+.typing{font-size:.9em;color:#555}
+</style>
+</head>
+<body>
+<header><h1>Push-to-Talk</h1></header>
+
+<main>
+  <section id="joinPanel">
+    <form id="joinForm" autocomplete="off">
+      <label for="nickname">Nickname</label>
+      <input id="nickname" type="text" required/>
+      <label for="statusSel">Status</label>
+      <select id="statusSel">
+        <option value="Online" selected>Online</option>
+        <option value="DND">Do Not Disturb</option>
+      </select>
+      <label for="avatar">Profile picture (optional)</label>
+      <input id="avatar" type="file" accept="image/*"/>
+      <button type="submit" class="primary">Join Lobby</button>
+    </form>
+  </section>
+
+  <section id="appPanel" hidden>
+    <aside class="sidebar">
+      <h3>Users</h3>
+      <ul id="userList" aria-live="polite"></ul>
+
+      <h3>Rooms</h3>
+      <ul id="roomList" aria-live="polite"></ul>
+
+      <button id="createRoomBtn" class="primary">➕ Create Room</button>
+    </aside>
+
+    <section class="chat">
+      <div class="toolbar">
+        <button id="pttBtn" class="accent">🎤 Hold to Talk</button>
+        <button id="voiceNoteBtn">🎙 Voice Note</button>
+        <button id="fileBtn">📎 File</button>
+        <button id="locationBtn">📍 Location</button>
+        <button id="dndBtn">🔕 DND</button>
+        <span id="scopeBadge" class="badge">Lobby</span>
+      </div>
+
+      <div id="log" role="log" aria-live="polite" tabindex="0" class="log"></div>
+
+      <div class="composer">
+        <input id="msgInput" type="text" placeholder="Message…"/>
+        <button id="sendBtn" class="primary">Send</button>
+      </div>
+      <div id="typing" aria-live="polite" class="typing" hidden></div>
+    </section>
+  </section>
+</main>
+
+<audio id="toneJoin" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg" preload="auto"></audio>
+<audio id="toneLeave" src="https://actions.google.com/sounds/v1/cartoon/pop.ogg" preload="auto"></audio>
+<audio id="toneMsg" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+<audio id="toneFile" src="https://actions.google.com/sounds/v1/cartoon/woodpecker.ogg" preload="auto"></audio>
+<audio id="tonePTT" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+let me = { id:null, name:null, status:'Online', avatar:null };
+let scope = { type:'lobby', roomId:null };
+
+const joinPanel=document.getElementById('joinPanel');
+const appPanel=document.getElementById('appPanel');
+const joinForm=document.getElementById('joinForm');
+const nickname=document.getElementById('nickname');
+const statusSel=document.getElementById('statusSel');
+const avatarInp=document.getElementById('avatar');
+
+const userList=document.getElementById('userList');
+const roomList=document.getElementById('roomList');
+const logEl=document.getElementById('log');
+const msgInput=document.getElementById('msgInput');
+const sendBtn=document.getElementById('sendBtn');
+const typingEl=document.getElementById('typing');
+const scopeBadge=document.getElementById('scopeBadge');
+const createRoomBtn=document.getElementById('createRoomBtn');
+
+const toneJoin=document.getElementById('toneJoin');
+const toneLeave=document.getElementById('toneLeave');
+const toneMsg=document.getElementById('toneMsg');
+const toneFile=document.getElementById('toneFile');
+const tonePTT=document.getElementById('tonePTT');
+
+function play(t){ try{ t.currentTime=0; t.play(); }catch(e){} }
+function notify(title, body){ if(window.Notification && Notification.permission==='granted'){ new Notification(title,{body}); } }
+function addLog(text){ const d=document.createElement('div'); d.className='entry'; d.textContent=text; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+
+joinForm.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  try{ if(Notification && Notification.permission!=='granted'){ await Notification.requestPermission(); } }catch{}
+  me.name = nickname.value.trim(); if(!me.name) return;
+  me.status = statusSel.value;
+  if(avatarInp.files[0]) me.avatar = await fileToBase64(avatarInp.files[0]);
+  socket.emit('join', { name: me.name, status: me.status, avatar: me.avatar });
+});
+
+function fileToBase64(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
+
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown',(e)=>{ socket.emit('typing',{ scope: scope.type, roomId: scope.roomId, typing:true }); if(e.key==='Enter'){ e.preventDefault(); sendMessage(); } });
+function sendMessage(){ const text=msgInput.value.trim(); if(!text) return; socket.emit('message',{ scope: scope.type, roomId: scope.roomId, text }); msgInput.value=''; }
+
+let mediaRecorder=null, chunks=[];
+const pttBtn=document.getElementById('pttBtn');
+pttBtn.addEventListener('mousedown', startRec); pttBtn.addEventListener('touchstart', startRec);
+pttBtn.addEventListener('mouseup', stopRec);   pttBtn.addEventListener('touchend', stopRec);
+async function startRec(){ play(tonePTT); const s=await navigator.mediaDevices.getUserMedia({audio:true}); mediaRecorder=new MediaRecorder(s); chunks=[]; mediaRecorder.ondataavailable=e=>chunks.push(e.data); mediaRecorder.onstop=async()=>{ const blob=new Blob(chunks,{type:'audio/webm'}); const arr=Array.from(new Uint8Array(await blob.arrayBuffer())); socket.emit('voice',{ scope: scope.type, roomId: scope.roomId, data: arr }); }; mediaRecorder.start(); }
+function stopRec(){ if(mediaRecorder && mediaRecorder.state!=='inactive'){ mediaRecorder.stop(); } }
+
+document.getElementById('fileBtn').addEventListener('click', ()=>{ const i=document.createElement('input'); i.type='file'; i.onchange=async()=>{ const f=i.files[0]; if(!f) return; const buf=await f.arrayBuffer(); socket.emit('file',{ scope: scope.type, roomId: scope.roomId, name:f.name, data:Array.from(new Uint8Array(buf)) }); }; i.click(); });
+document.getElementById('locationBtn').addEventListener('click', ()=>{ navigator.geolocation.getCurrentPosition(pos=>{ socket.emit('location',{ scope: scope.type, roomId: scope.roomId, lat:pos.coords.latitude, lon:pos.coords.longitude }); }); });
+document.getElementById('dndBtn').addEventListener('click', ()=>{ me.status = me.status==='DND'?'Online':'DND'; socket.emit('update-status',{ status: me.status }); });
+
+createRoomBtn.addEventListener('click', ()=>{
+  const ids=[...userList.querySelectorAll('li[data-id]')].map(li=>li.getAttribute('data-id')).filter(id=>id!==socket.id);
+  const name='Room '+Math.random().toString(36).slice(2,6);
+  socket.emit('create-room', { name, memberIds: ids, pinned: true });
+});
+
+socket.on('connect', ()=>{ me.id=socket.id; });
+
+socket.on('joined', ({me:info})=>{
+  Object.assign(me, info);
+  joinPanel.hidden=true; appPanel.hidden=false;
+  addLog(`Joined as ${me.name} (${me.status})`);
+});
+
+socket.on('update-user-list', (users)=>{
+  userList.innerHTML='';
+  users.forEach(u=>{
+    const li=document.createElement('li'); li.dataset.id=u.id;
+    const dot=document.createElement('span'); dot.className='dot'; dot.style.background=u.status==='DND'?'#ef4444':'#22c55e';
+    const img=document.createElement('img'); img.src=u.avatar||'https://avatars.githubusercontent.com/u/9919?s=64&v=4'; img.alt=`${u.name} avatar`;
+    const nm=document.createElement('span'); nm.className='name'; nm.textContent=u.name;
+    const st=document.createElement('span'); st.textContent=' — '+u.status;
+    li.append(dot,img,nm,st); userList.append(li);
+  });
+});
+
+socket.on('room-list', (rooms)=>{
+  roomList.innerHTML='';
+  rooms.forEach(r=>{
+    const li=document.createElement('li');
+    li.textContent=`${r.name} (${r.members.length})${r.pinned?' 📌':''}`;
+    li.tabIndex=0;
+    li.addEventListener('click', ()=> socket.emit('switch-room',{ roomId:r.id }));
+    roomList.append(li);
+  });
+});
+
+socket.on('invite', ({from, room})=>{
+  const ok=confirm(`${from.name} invited you to “${room.name}”. Accept?`);
+  socket.emit('invite-response',{ roomId: room.id, accept: ok });
+});
+
+socket.on('scope', (s)=>{ scope=s; scopeBadge.textContent=s.type==='lobby'?'Lobby':`Room: ${s.name}`; addLog(`Switched to ${scopeBadge.textContent}`); });
+
+socket.on('user-joined', ({name})=>{ addLog(`${name} joined`); play(toneJoin); });
+socket.on('user-left', ({name})=>{ addLog(`${name} left`); play(toneLeave); });
+socket.on('message', ({from, text})=>{ addLog(`${from}: ${text}`); play(toneMsg); notify(`Message from ${from}`, text); });
+socket.on('typing', ({name})=>{ typingEl.hidden=false; typingEl.textContent=`${name} is typing…`; setTimeout(()=> typingEl.hidden=true, 1200); });
+socket.on('voice', ({from, data})=>{ addLog(`${from} sent a voice clip`); const a=document.createElement('audio'); a.controls=true; const blob=new Blob([new Uint8Array(data)],{type:'audio/webm'}); a.src=URL.createObjectURL(blob); logEl.appendChild(a); play(toneMsg); });
+socket.on('file', ({from, name})=>{ addLog(`${from} sent file “${name}”`); play(toneFile); });
+socket.on('location', ({from, lat, lon})=>{ addLog(`${from} location: ${lat.toFixed(4)}, ${lon.toFixed(4)}`); });
+</script>
+</body>
+</html>
