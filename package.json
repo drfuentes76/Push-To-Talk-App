@@ -1,6 +1,6 @@
 {
-  "name": "push-to-talk-full-feature",
-  "version": "3.2.0",
+  "name": "ptt-dualcam-emergency",
+  "version": "3.4.0",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

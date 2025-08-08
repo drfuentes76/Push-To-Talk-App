@@ -1,2 +1,248 @@
 <!DOCTYPE html>
-<!-- trimmed for brevity in this Python cell -->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Push‑to‑Talk — Dual Cam + Emergency</title>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;background:#f6f7fb;color:#111}
+  header{padding:12px 16px;background:#111;color:#fff;display:flex;justify-content:space-between;align-items:center}
+  main{padding:12px}
+  .primary{background:#2b6cff;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+  .accent{background:#10b981;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+  .danger{background:#ef4444;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+  .badge{background:#eee;border-radius:999px;padding:4px 10px;margin-left:8px}
+  #joinPanel,#appPanel{max-width:1200px;margin:0 auto}
+  #joinForm{display:grid;grid-template-columns:1fr;gap:10px;max-width:420px}
+  #appPanel{display:grid;grid-template-columns:320px 1fr;gap:12px;margin-top:16px}
+  .sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:75vh;overflow:auto}
+  .sidebar ul{list-style:none;margin:6px 0;padding:0}
+  .sidebar li{padding:6px;border-radius:8px}
+  .chat{display:flex;flex-direction:column;gap:8px}
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .log{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:40vh;overflow:auto}
+  .video-area{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
+  video{max-width:260px;border-radius:8px;border:1px solid #ddd;background:#000}
+  select, input[type=text]{padding:8px;border:1px solid #ccc;border-radius:8px}
+  button:disabled{opacity:.5;cursor:not-allowed}
+</style>
+</head>
+<body>
+<header>
+  <h1>Push‑to‑Talk</h1>
+  <div>
+    <label for="camMode">Camera:</label>
+    <select id="camMode" aria-label="Camera mode">
+      <option value="front" selected>Front</option>
+      <option value="rear">Rear</option>
+      <option value="dual">Dual (front + rear)</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <section id="joinPanel">
+    <form id="joinForm" autocomplete="off">
+      <label for="nickname">Nickname</label>
+      <input id="nickname" type="text" required/>
+      <label for="statusSel">Status</label>
+      <select id="statusSel">
+        <option value="Online" selected>Online</option>
+        <option value="DND">Do Not Disturb</option>
+      </select>
+      <button type="submit" class="primary">Join Lobby</button>
+    </form>
+  </section>
+
+  <section id="appPanel" hidden>
+    <aside class="sidebar">
+      <h3>Users</h3>
+      <ul id="userList" aria-live="polite"></ul>
+      <h3>Rooms</h3>
+      <ul id="roomList" aria-live="polite"></ul>
+      <button id="createRoomBtn" class="primary">➕ Create Room</button>
+      <button id="backToLobbyBtn" class="primary" style="margin-top:6px;">⬅ Back to Lobby</button>
+      <hr/>
+      <button id="startEmergencyBtn" class="danger">🚨 Start Emergency (video+GPS)</button>
+      <button id="stopEmergencyBtn" class="primary" disabled>🛑 Stop Emergency</button>
+    </aside>
+
+    <section class="chat">
+      <div class="toolbar">
+        <button id="pttBtn" class="accent">🎤 Hold to Talk</button>
+        <button id="voiceNoteBtn">🎙 Voice Note</button>
+        <button id="fileBtn">📎 File</button>
+        <button id="locationBtn">📍 Share Location</button>
+        <button id="videoBtn">📹 Start Video</button>
+        <button id="endVideoBtn" disabled>🛑 End Video</button>
+        <span id="scopeBadge" class="badge">Lobby</span>
+      </div>
+
+      <div class="video-area">
+        <video id="localVideo" autoplay muted playsinline></video>
+      </div>
+
+      <div id="log" role="log" aria-live="polite" tabindex="0" class="log"></div>
+
+      <div class="composer">
+        <input id="msgInput" type="text" placeholder="Message…"/>
+        <button id="sendBtn" class="primary">Send</button>
+      </div>
+    </section>
+  </section>
+</main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+function addLog(t){ const d=document.createElement('div'); d.textContent=t; const log=document.getElementById('log'); log.appendChild(d); log.scrollTop=log.scrollHeight; }
+function saveBlob(name,blob){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1500); }
+const socket = io({ path:'/socket.io', transports:['websocket','polling'], reconnection:true });
+let me={}; let scope={ type:'lobby', roomId:null };
+
+// Join
+document.getElementById('joinForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const name=document.getElementById('nickname').value.trim(); if(!name) return;
+  socket.emit('join',{ name, status: document.getElementById('statusSel').value, avatar:null });
+});
+socket.on('joined', ({me:info})=>{ me=info; document.getElementById('joinPanel').hidden=true; document.getElementById('appPanel').hidden=false; addLog('Joined as '+me.name); });
+
+// Lists / scope
+socket.on('update-user-list', users=>{
+  const ul=document.getElementById('userList'); ul.innerHTML='';
+  users.forEach(u=>{ const li=document.createElement('li'); li.dataset.id=u.id; li.textContent=u.name+' — '+u.status; ul.append(li); });
+});
+socket.on('room-list', rooms=>{
+  const ul=document.getElementById('roomList'); ul.innerHTML='';
+  rooms.forEach(r=>{ const li=document.createElement('li'); li.textContent=r.name+' ('+r.members.length+')'+(r.pinned?' 📌':''); li.onclick=()=>socket.emit('switch-room',{ roomId:r.id }); ul.append(li); });
+});
+socket.on('scope', s=>{
+  scope=s; document.getElementById('scopeBadge').textContent=s.type==='lobby'?'Lobby':('Room: '+s.name);
+  if(s.url && location.pathname!==s.url) history.replaceState({}, s.name, s.url);
+  addLog('Switched to '+document.getElementById('scopeBadge').textContent);
+});
+
+// Messaging
+document.getElementById('sendBtn').addEventListener('click', ()=>{
+  const input=document.getElementById('msgInput'); const text=input.value.trim(); if(!text) return;
+  socket.emit('message',{ scope: scope.type, roomId: scope.roomId, text }); input.value='';
+});
+socket.on('message', ({from,text})=> addLog(from+': '+text));
+
+// Files
+document.getElementById('fileBtn').addEventListener('click', ()=>{
+  const i=document.createElement('input'); i.type='file';
+  i.onchange=async()=>{ const f=i.files[0]; if(!f) return; const buf=await f.arrayBuffer(); socket.emit('file',{ scope: scope.type, roomId: scope.roomId, name:f.name, data:Array.from(new Uint8Array(buf)) }); };
+  i.click();
+});
+socket.on('file', ({from,name,data})=>{
+  addLog(from+' sent file '+name); const blob=new Blob([new Uint8Array(data)]); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.textContent='Download'; document.getElementById('log').append(a);
+});
+
+// Location
+document.getElementById('locationBtn').addEventListener('click', ()=>{
+  navigator.geolocation.getCurrentPosition(pos=>{
+    socket.emit('location',{ scope: scope.type, roomId: scope.roomId, lat: pos.coords.latitude, lon: pos.coords.longitude });
+  }, err=> addLog('Location error: '+err.message));
+});
+socket.on('location', ({from,lat,lon})=> addLog(`${from} shared location: ${lat.toFixed(5)}, ${lon.toFixed(5)}`));
+
+// Voice note / PTT
+let mediaRecorder=null, chunks=[];
+const pttBtn=document.getElementById('pttBtn');
+pttBtn.addEventListener('mousedown', startRec); pttBtn.addEventListener('touchstart', startRec);
+pttBtn.addEventListener('mouseup', stopRec);    pttBtn.addEventListener('touchend', stopRec);
+document.getElementById('voiceNoteBtn').addEventListener('click', async()=>{
+  const s=await navigator.mediaDevices.getUserMedia({audio:true}); chunks=[]; mediaRecorder=new MediaRecorder(s);
+  mediaRecorder.ondataavailable=e=>chunks.push(e.data);
+  mediaRecorder.onstop=async()=>{ const b=new Blob(chunks,{type: mediaRecorder.mimeType||'audio/webm'}); const arr=Array.from(new Uint8Array(await b.arrayBuffer())); socket.emit('voice',{ scope: scope.type, roomId: scope.roomId, data: arr, mime:b.type }); };
+  mediaRecorder.start(); setTimeout(()=>mediaRecorder.stop(), 1500);
+});
+async function startRec(){ const s=await navigator.mediaDevices.getUserMedia({audio:true}); chunks=[]; mediaRecorder=new MediaRecorder(s); mediaRecorder.ondataavailable=e=>chunks.push(e.data); mediaRecorder.onstop=async()=>{ const b=new Blob(chunks,{type: mediaRecorder.mimeType||'audio/webm'}); const arr=Array.from(new Uint8Array(await b.arrayBuffer())); socket.emit('voice',{ scope: scope.type, roomId: scope.roomId, data: arr, mime:b.type }); }; mediaRecorder.start(); }
+function stopRec(){ if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); }
+socket.on('voice', ({from,data,mime})=>{ addLog(from+' sent a voice clip'); const blob=new Blob([new Uint8Array(data)],{type:mime||'audio/webm'}); const a=document.createElement('audio'); a.controls=true; a.src=URL.createObjectURL(blob); const btn=document.createElement('button'); btn.textContent='Save'; btn.onclick=()=>saveBlob('voice_'+Date.now()+'.webm',blob); const row=document.createElement('div'); row.append(a,btn); document.getElementById('log').append(row); });
+
+// ----- Video: front / rear / dual (canvas mix) -----
+const localVideo=document.getElementById('localVideo');
+const camModeSel=document.getElementById('camMode');
+const startBtn=document.getElementById('videoBtn');
+const endBtn=document.getElementById('endVideoBtn');
+let current={ mic:null, v1:null, v2:null, mixed:null, raf:null };
+
+function stopTracks(s){ if(!s) return; s.getTracks().forEach(t=>t.stop()); }
+function clearVideo(){ stopTracks(current.mic); stopTracks(current.v1); stopTracks(current.v2); stopTracks(current.mixed); if(current.raf) cancelAnimationFrame(current.raf); current={ mic:null, v1:null, v2:null, mixed:null, raf:null }; localVideo.srcObject=null; }
+async function getCam(facing){ return navigator.mediaDevices.getUserMedia({ video:{ facingMode:facing, width:640, height:480, frameRate:24 }, audio:false }); }
+async function startDual(){
+  const rear = await getCam({exact:'environment'}).catch(()=>null);
+  const front= await getCam('user').catch(()=>null);
+  if(!rear || !front) return null;
+  const vR=document.createElement('video'); vR.muted=true; vR.srcObject=rear; await vR.play().catch(()=>{});
+  const vF=document.createElement('video'); vF.muted=true; vF.srcObject=front; await vF.play().catch(()=>{});
+  const w=480,h=360; const c=document.createElement('canvas'); c.width=w*2; c.height=h; const ctx=c.getContext('2d');
+  const draw=()=>{ ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(vR,0,0,w,h); ctx.drawImage(vF,w,0,w,h); current.raf=requestAnimationFrame(draw); }; draw();
+  const out=c.captureStream(24);
+  current.v1=rear; current.v2=front; current.mixed=out;
+  return out;
+}
+async function startVideo(mode){
+  clearVideo();
+  current.mic = await navigator.mediaDevices.getUserMedia({audio:true}).catch(()=>null);
+  if(mode==='dual'){
+    const mixed = await startDual();
+    if(!mixed){ // fallback to single cam front
+      const single = await getCam('user'); current.v1=single; const out=new MediaStream(single.getTracks()); if(current.mic) current.mic.getTracks().forEach(t=>out.addTrack(t)); localVideo.srcObject=out; startBtn.disabled=true; endBtn.disabled=false; addLog('Video started (fallback single cam)'); return;
+    }
+    if(current.mic) current.mic.getTracks().forEach(t=>mixed.addTrack(t));
+    localVideo.srcObject=mixed; startBtn.disabled=true; endBtn.disabled=false; addLog('Video started (dual camera)');
+    return;
+  }
+  const facing = mode==='rear'?{exact:'environment'}:'user';
+  const cam = await getCam(facing); current.v1=cam;
+  const out = new MediaStream(cam.getTracks()); if(current.mic) current.mic.getTracks().forEach(t=>out.addTrack(t));
+  localVideo.srcObject=out; startBtn.disabled=true; endBtn.disabled=false; addLog('Video started ('+mode+')');
+}
+function endVideo(){ clearVideo(); startBtn.disabled=false; endBtn.disabled=true; addLog('Video stopped'); }
+startBtn.addEventListener('click', ()=> startVideo(camModeSel.value));
+endBtn.addEventListener('click', endVideo);
+camModeSel.addEventListener('change', ()=>{ if(localVideo.srcObject) { endVideo(); startVideo(camModeSel.value); } });
+
+// ----- Emergency: live mic+video + GPS pings -----
+let emergencyTicker=null;
+document.getElementById('startEmergencyBtn').addEventListener('click', async()=>{
+  addLog('🚨 Emergency started (sharing GPS + starting local video)');
+  socket.emit('emergency-stream',{ action:'start' });
+  if(!localVideo.srcObject){ await startVideo(camModeSel.value); }
+  emergencyTicker = setInterval(()=>{
+    navigator.geolocation.getCurrentPosition(pos=>{
+      socket.emit('emergency-stream',{ action:'gps', meta:{ lat:pos.coords.latitude, lon:pos.coords.longitude } });
+    }, ()=>{});
+  }, 4000);
+  document.getElementById('startEmergencyBtn').disabled=true;
+  document.getElementById('stopEmergencyBtn').disabled=false;
+});
+document.getElementById('stopEmergencyBtn').addEventListener('click', ()=>{
+  if(emergencyTicker) clearInterval(emergencyTicker);
+  socket.emit('emergency-stream',{ action:'stop' });
+  addLog('🛑 Emergency stopped');
+  document.getElementById('startEmergencyBtn').disabled=false;
+  document.getElementById('stopEmergencyBtn').disabled=true;
+});
+socket.on('emergency-signal', ({from,action,meta})=>{
+  if(action==='start') addLog(`🚨 Emergency from ${from.name}`);
+  if(action==='gps'&&meta) addLog(`GPS from ${from.name}: ${meta.lat.toFixed(5)}, ${meta.lon.toFixed(5)}`);
+  if(action==='stop') addLog(`🛑 Emergency ended by ${from.name}`);
+});
+
+// Rooms
+document.getElementById('createRoomBtn').addEventListener('click', ()=>{
+  const ids=[...document.querySelectorAll('#userList li[data-id]')].map(li=>li.getAttribute('data-id')).filter(id=>id!==socket.id);
+  socket.emit('create-room',{ name:'Room '+Math.random().toString(36).slice(2,6), memberIds: ids, pinned:true });
+});
+document.getElementById('backToLobbyBtn').addEventListener('click', ()=>{
+  if(scope.type==='lobby') return;
+  history.replaceState({}, 'Lobby', '/'); socket.emit('switch-room',{ roomId: null });
+  scope = { type:'lobby', roomId:null, name:null }; document.getElementById('scopeBadge').textContent='Lobby'; addLog('Returned to Lobby');
+});
+</script>
+</body>
+</html>

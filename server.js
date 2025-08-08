@@ -1,3 +1,4 @@
+// server.js — dual‑camera + emergency streaming support
 const path = require('path');
 const express = require('express');
 const http = require('http');
@@ -21,7 +22,7 @@ const serializeRooms = () => [...rooms.values()].map(r => ({ id:r.id, name:r.nam
 
 io.on('connection', (socket) => {
   const ip = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
-  console.log('connected:', socket.id, 'ip:', ip);
+  console.log('[io] connected:', socket.id, ip);
 
   socket.on('join', ({ name, status, avatar }) => {
     const u = { id: socket.id, name: name || 'Anonymous', status: status || 'Online', avatar: avatar || null, ip };
@@ -31,12 +32,6 @@ io.on('connection', (socket) => {
     io.emit('user-joined', { name: u.name });
     io.emit('update-user-list', serializeUsers());
     io.emit('room-list', serializeRooms());
-  });
-
-  socket.on('update-status', ({ status }) => {
-    const u = users.get(socket.id); if (!u) return;
-    u.status = status || 'Online';
-    io.emit('update-user-list', serializeUsers());
   });
 
   socket.on('message', ({ scope, roomId, text }) => {
@@ -73,16 +68,18 @@ io.on('connection', (socket) => {
     else io.to('lobby').emit('location', payload);
   });
 
+  // --- Emergency signaling (broadcast to all except sender by default) ---
   socket.on('emergency-stream', ({ targetIds = [], action, meta }) => {
     const targets = targetIds.length ? targetIds : Array.from(io.sockets.sockets.keys()).filter(id => id !== socket.id);
     targets.forEach(id => io.to(id).emit('emergency-signal', { from: users.get(socket.id), action, meta }));
   });
 
-  socket.on('create-room', ({ name, memberIds = [], pinned = false }) => {
+  // --- Rooms + invites ---
+  socket.on('create-room', ({ name, memberIds = [], pinned = true }) => {
     const id = 'room_' + Math.random().toString(36).slice(2, 9);
-    rooms.set(id, { id, name, owner: socket.id, members: [socket.id], pinned });
+    rooms.set(id, { id, name: name || 'Room', owner: socket.id, members: [socket.id], pinned });
     socket.join(id); socket.leave('lobby');
-    socket.emit('scope', { type: 'room', roomId: id, name, url: `/room/${id}` });
+    socket.emit('scope', { type: 'room', roomId: id, name: rooms.get(id).name, url: `/room/${id}` });
     io.emit('room-list', serializeRooms());
     memberIds.forEach((mid) => {
       const s = io.sockets.sockets.get(mid);
