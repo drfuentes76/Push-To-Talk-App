@@ -1,6 +1,6 @@
 {
   "name": "push-to-talk-app",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
