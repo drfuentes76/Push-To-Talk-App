@@ -1,4 +1,3 @@
-// server.js - merged hotfix
 const path = require('path');
 const express = require('express');
 const http = require('http');
@@ -14,15 +13,15 @@ app.get('/room/:id', (_req, res) => res.sendFile(path.join(__dirname, 'index.htm
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // --- State ---
-const users = new Map(); // socket.id -> {id,name,status,avatar,ip}
-const rooms = new Map(); // roomId -> {id,name,owner,members[],pinned}
+const users = new Map();
+const rooms = new Map();
 
 const serializeUsers = () => [...users.values()].map(u => ({ id:u.id, name:u.name, status:u.status, avatar:u.avatar }));
 const serializeRooms = () => [...rooms.values()].map(r => ({ id:r.id, name:r.name, members:r.members, pinned:r.pinned }));
 
 io.on('connection', (socket) => {
-  console.log('[io] connection', socket.id);
   const ip = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
+  console.log('connected:', socket.id, 'ip:', ip);
 
   socket.on('join', ({ name, status, avatar }) => {
     const u = { id: socket.id, name: name || 'Anonymous', status: status || 'Online', avatar: avatar || null, ip };
@@ -74,13 +73,11 @@ io.on('connection', (socket) => {
     else io.to('lobby').emit('location', payload);
   });
 
-  // Emergency signaling
   socket.on('emergency-stream', ({ targetIds = [], action, meta }) => {
     const targets = targetIds.length ? targetIds : Array.from(io.sockets.sockets.keys()).filter(id => id !== socket.id);
     targets.forEach(id => io.to(id).emit('emergency-signal', { from: users.get(socket.id), action, meta }));
   });
 
-  // Rooms + invites
   socket.on('create-room', ({ name, memberIds = [], pinned = false }) => {
     const id = 'room_' + Math.random().toString(36).slice(2, 9);
     rooms.set(id, { id, name, owner: socket.id, members: [socket.id], pinned });

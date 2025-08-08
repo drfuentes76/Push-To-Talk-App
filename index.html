@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Push‑to‑Talk (Merged Hotfix)</title>
+<title>Push‑to‑Talk (Full Feature)</title>
 <style>
 body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;background:#f6f7fb;color:#111}
 header{padding:12px 16px;background:#111;color:#fff;display:flex;justify-content:space-between;align-items:center}
@@ -85,7 +85,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
         <button id="voiceNoteBtn">🎙 Voice Note</button>
         <button id="fileBtn">📎 File</button>
         <button id="locationBtn">📍 Share Location</button>
-        <button id="videoBtn">📹 Start Video Conference</button>
+        <button id="videoBtn">📹 Start Video</button>
         <span id="scopeBadge" class="badge">Lobby</span>
       </div>
 
@@ -119,116 +119,108 @@ window.addEventListener('unhandledrejection',(e)=>{
 
 function isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent); }
 function isAndroid(){ return /Android/.test(navigator.userAgent); }
+function addLog(text){ const d=document.createElement('div'); d.textContent=text; document.getElementById('log').appendChild(d); document.getElementById('log').scrollTop=document.getElementById('log').scrollHeight; }
+function saveBlob(name, blob){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
 function openNativeMaps(lat, lon, label='Location'){
-  const enc = encodeURIComponent(label);
-  if(isIOS()){
-    const url = `maps://?q=${enc}&ll=${lat},${lon}`;
-    const t=setTimeout(()=>window.open(`http://maps.apple.com/?q=${enc}&ll=${lat},${lon}`,'_blank'),300);
-    window.location.href=url; setTimeout(()=>clearTimeout(t),1000); return;
-  }
-  if(isAndroid()){
-    window.location.href = `geo:${lat},${lon}?q=${lat},${lon}(${enc})`; return;
-  }
+  const enc=encodeURIComponent(label);
+  if(isIOS()){ const url=`maps://?q=${enc}&ll=${lat},${lon}`; const t=setTimeout(()=>window.open(`http://maps.apple.com/?q=${enc}&ll=${lat},${lon}`,'_blank'),300); window.location.href=url; setTimeout(()=>clearTimeout(t),1000); return; }
+  if(isAndroid()){ window.location.href=`geo:${lat},${lon}?q=${lat},${lon}(${enc})`; return; }
   window.open(`https://www.google.com/maps?q=${lat},${lon}(${enc})`,'_blank');
 }
 function openNativeNavigation(lat, lon, label='Destination'){
   const enc=encodeURIComponent(label);
-  if(isIOS()){
-    const url=`maps://?daddr=${lat},${lon}&q=${enc}`;
-    const t=setTimeout(()=>window.open(`http://maps.apple.com/?daddr=${lat},${lon}&q=${enc}`,'_blank'),300);
-    window.location.href=url; setTimeout(()=>clearTimeout(t),1000); return;
-  }
-  if(isAndroid()){
-    try{ window.location.href=`google.navigation:q=${lat},${lon}`; }catch{ window.location.href=`geo:0,0?q=${lat},${lon}(${enc})`; } return;
-  }
+  if(isIOS()){ const url=`maps://?daddr=${lat},${lon}&q=${enc}`; const t=setTimeout(()=>window.open(`http://maps.apple.com/?daddr=${lat},${lon}&q=${enc}`,'_blank'),300); window.location.href=url; setTimeout(()=>clearTimeout(t),1000); return; }
+  if(isAndroid()){ try{ window.location.href=`google.navigation:q=${lat},${lon}`; }catch{ window.location.href=`geo:0,0?q=${lat},${lon}(${enc})`; } return; }
   window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`,'_blank');
-}
-function saveBlob(name, blob){
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
-}
-function addLog(text){
-  const d=document.createElement('div'); d.className='entry'; d.textContent=text;
-  document.getElementById('log').appendChild(d);
-  document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
 }
 
 const socket = io({ path:'/socket.io', transports:['websocket','polling'], reconnection:true, reconnectionAttempts:Infinity, reconnectionDelay:800, reconnectionDelayMax:3000 });
-let me = { id:null, name:null, status:'Online', avatar:null };
-let scope = { type:'lobby', roomId:null, name:null };
+let me={ id:null, name:null, status:'Online', avatar:null };
+let scope={ type:'lobby', roomId:null, name:null };
+let mediaRecorder=null, chunks=[];
+const localVideo=document.getElementById('localVideo');
+const camModeSel=document.getElementById('camMode');
 
-(function initStoredName(){
-  const stored = localStorage.getItem('ptt_name');
-  if(stored){ document.getElementById('nickname').value = stored; }
-})();
+(function initStoredName(){ const n=localStorage.getItem('ptt_name'); if(n) document.getElementById('nickname').value=n; })();
 
-socket.on('connect', ()=>{ me.id = socket.id; addLog('Connected: '+socket.id); });
-socket.on('reconnect', ()=>{ addLog('Reconnected'); });
-
+socket.on('connect', ()=> addLog('Connected '+socket.id));
 socket.on('joined', ({me:info})=>{
-  Object.assign(me, info);
-  localStorage.setItem('ptt_name', me.name);
-  document.getElementById('joinPanel').hidden=true;
-  document.getElementById('appPanel').hidden=false;
-  addLog(`Joined as ${me.name}`);
-  const m = location.pathname.match(/\/room\/(.+)$/);
-  if(m && m[1]){ socket.emit('switch-room', { roomId: m[1] }); }
+  me=info; localStorage.setItem('ptt_name', me.name);
+  document.getElementById('joinPanel').hidden=true; document.getElementById('appPanel').hidden=false;
+  addLog('Joined as '+me.name);
+  const m=location.pathname.match(/\/room\/(.+)$/); if(m&&m[1]) socket.emit('switch-room',{roomId:m[1]});
 });
-
-socket.on('update-user-list', (users)=>{
+socket.on('update-user-list', users=>{
   const ul=document.getElementById('userList'); ul.innerHTML='';
-  users.forEach(u=>{
-    const li=document.createElement('li'); li.dataset.id=u.id;
-    li.textContent = `${u.name} — ${u.status}`;
-    ul.append(li);
-  });
+  users.forEach(u=>{ const li=document.createElement('li'); li.dataset.id=u.id; li.textContent=`${u.name} — ${u.status}`; ul.append(li); });
 });
-
-socket.on('room-list', (rooms)=>{
+socket.on('room-list', rooms=>{
   const ul=document.getElementById('roomList'); ul.innerHTML='';
-  rooms.forEach(r=>{
-    const li=document.createElement('li');
-    li.textContent=`${r.name} (${r.members.length})${r.pinned?' 📌':''}`;
-    li.tabIndex=0; li.addEventListener('click', ()=> socket.emit('switch-room',{ roomId:r.id }));
-    ul.append(li);
-  });
+  rooms.forEach(r=>{ const li=document.createElement('li'); li.textContent=`${r.name} (${r.members.length})${r.pinned?' 📌':''}`; li.onclick=()=>socket.emit('switch-room',{roomId:r.id}); ul.append(li); });
 });
-
-socket.on('scope', (s)=>{
-  scope = s;
-  document.getElementById('scopeBadge').textContent = s.type==='lobby' ? 'Lobby' : `Room: ${s.name}`;
-  if(s.url && location.pathname !== s.url){ history.replaceState({}, s.name, s.url); }
-  addLog(`Switched to ${document.getElementById('scopeBadge').textContent}`);
+socket.on('scope', s=>{
+  scope=s; document.getElementById('scopeBadge').textContent=s.type==='lobby'?'Lobby':`Room: ${s.name}`;
+  if(s.url && location.pathname!==s.url) history.replaceState({}, s.name, s.url);
+  addLog('Switched to '+document.getElementById('scopeBadge').textContent);
 });
+socket.on('message', ({from,text})=> addLog(from+': '+text));
+socket.on('typing', ({name})=>{ const t=document.getElementById('typing'); t.hidden=false; t.textContent=name+' is typing…'; setTimeout(()=>t.hidden=true,1200); });
+socket.on('voice', async ({from,data,mime})=>{ addLog(from+' sent a voice clip'); const blob=new Blob([new Uint8Array(data)],{type:mime||'audio/webm'}); const a=document.createElement('audio'); a.controls=true; a.src=URL.createObjectURL(blob); const btn=document.createElement('button'); btn.textContent='Save'; btn.onclick=()=>saveBlob('voice_'+Date.now()+'.webm',blob); const row=document.createElement('div'); row.append(a,btn); document.getElementById('log').append(row); });
+socket.on('file', ({from,name,data})=>{ addLog(from+' sent file '+name); const blob=new Blob([new Uint8Array(data)]); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.textContent='Download'; document.getElementById('log').append(a); });
+socket.on('location', ({from,lat,lon})=>{ const div=document.createElement('div'); div.textContent=`${from} shared a location`; const open=document.createElement('button'); open.textContent='Open in Maps'; open.onclick=()=>openNativeMaps(lat,lon,from+' location'); const nav=document.createElement('button'); nav.textContent='Navigate'; nav.onclick=()=>openNativeNavigation(lat,lon,from+' location'); div.append(' ',open,' ',nav); document.getElementById('log').append(div); });
+socket.on('emergency-signal', ({from,action,meta})=>{ if(action==='start') addLog('🚨 Emergency from '+from.name); if(action==='gps'&&meta){ const div=document.createElement('div'); div.textContent='GPS update from '+from.name; const open=document.createElement('button'); open.textContent='Open in Maps'; open.onclick=()=>openNativeMaps(meta.lat,meta.lon,from.name+' emergency'); const nav=document.createElement('button'); nav.textContent='Navigate'; nav.onclick=()=>openNativeNavigation(meta.lat,meta.lon,from.name+' emergency'); div.append(' ',open,' ',nav); document.getElementById('log').append(div);} if(action==='stop') addLog('🛑 Emergency ended'); });
 
-document.getElementById('joinForm').addEventListener('submit', async (e)=>{
+document.getElementById('joinForm').addEventListener('submit', async e=>{
   e.preventDefault();
-  const name = document.getElementById('nickname').value.trim(); if(!name) return;
-  const status = 'Online';
-  socket.emit('join', { name, status, avatar: null });
+  const name=document.getElementById('nickname').value.trim(); if(!name) return;
+  const status=document.getElementById('statusSel').value;
+  let avatar=null; const av=document.getElementById('avatar'); if(av.files[0]){ avatar=await av.files[0].arrayBuffer().then(buf=>'data:image/*;base64,'+btoa(String.fromCharCode(...new Uint8Array(buf)))); }
+  socket.emit('join',{name,status,avatar});
 });
 
+document.getElementById('sendBtn').addEventListener('click', ()=>{
+  const text=document.getElementById('msgInput').value.trim(); if(!text) return;
+  socket.emit('message',{ scope: scope.type, roomId: scope.roomId, text }); document.getElementById('msgInput').value='';
+});
+document.getElementById('msgInput').addEventListener('keydown', e=>{ socket.emit('typing',{ scope: scope.type, roomId: scope.roomId, typing:true }); if(e.key==='Enter'){ e.preventDefault(); document.getElementById('sendBtn').click(); } });
+
+document.getElementById('fileBtn').addEventListener('click', ()=>{
+  const i=document.createElement('input'); i.type='file';
+  i.onchange=async()=>{ const f=i.files[0]; if(!f) return; const buf=await f.arrayBuffer(); socket.emit('file',{ scope: scope.type, roomId: scope.roomId, name:f.name, data:Array.from(new Uint8Array(buf)) }); };
+  i.click();
+});
+
+document.getElementById('locationBtn').addEventListener('click', ()=>{
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const {latitude:lat, longitude:lon}=pos.coords;
+    socket.emit('location',{ scope: scope.type, roomId: scope.roomId, lat, lon });
+  }, err=> addLog('Location error: '+err.message));
+});
+
+// PTT / Voice
+const pttBtn=document.getElementById('pttBtn');
+pttBtn.addEventListener('mousedown', startRec); pttBtn.addEventListener('touchstart', startRec);
+pttBtn.addEventListener('mouseup', stopRec); pttBtn.addEventListener('touchend', stopRec);
+document.getElementById('voiceNoteBtn').addEventListener('click', async()=>{ const s=await navigator.mediaDevices.getUserMedia({audio:true}); chunks=[]; mediaRecorder=new MediaRecorder(s); mediaRecorder.ondataavailable=e=>chunks.push(e.data); mediaRecorder.onstop=async()=>{ const b=new Blob(chunks,{type: mediaRecorder.mimeType||'audio/webm'}); const arr=Array.from(new Uint8Array(await b.arrayBuffer())); socket.emit('voice',{ scope: scope.type, roomId: scope.roomId, data: arr, mime:b.type }); }; mediaRecorder.start(); setTimeout(()=>mediaRecorder.stop(),1500); });
+async function startRec(){ const s=await navigator.mediaDevices.getUserMedia({audio:true}); chunks=[]; mediaRecorder=new MediaRecorder(s); mediaRecorder.ondataavailable=e=>chunks.push(e.data); mediaRecorder.onstop=async()=>{ const b=new Blob(chunks,{type: mediaRecorder.mimeType||'audio/webm'}); const arr=Array.from(new Uint8Array(await b.arrayBuffer())); socket.emit('voice',{ scope: scope.type, roomId: scope.roomId, data: arr, mime:b.type }); }; mediaRecorder.start(); }
+function stopRec(){ if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); }
+
+// Rooms
 document.getElementById('createRoomBtn').addEventListener('click', ()=>{
   const ids=[...document.querySelectorAll('#userList li[data-id]')].map(li=>li.getAttribute('data-id')).filter(id=>id!==socket.id);
   socket.emit('create-room',{ name:'Room '+Math.random().toString(36).slice(2,6), memberIds: ids, pinned:true });
 });
-
 document.getElementById('backToLobbyBtn').addEventListener('click', ()=>{
   if(scope.type==='lobby') return;
-  history.replaceState({}, 'Lobby', '/');
-  socket.emit('switch-room',{ roomId: null });
-  scope = { type:'lobby', roomId:null, name:null };
-  document.getElementById('scopeBadge').textContent='Lobby';
-  addLog('Returned to Lobby');
+  history.replaceState({}, 'Lobby', '/'); socket.emit('switch-room',{ roomId: null });
+  scope = { type:'lobby', roomId:null, name:null }; document.getElementById('scopeBadge').textContent='Lobby'; addLog('Returned to Lobby');
 });
 
-// Messaging (minimal for merged hotfix)
-document.getElementById('sendBtn').addEventListener('click', ()=>{
-  const text=document.getElementById('msgInput').value.trim(); if(!text) return;
-  socket.emit('message',{ scope: scope.type, roomId: scope.roomId, text });
-  document.getElementById('msgInput').value='';
-});
-socket.on('message', ({from, text})=> addLog(from+': '+text));
+// Video (preview only)
+const currentMedia={}; function stopTracks(s){ if(!s) return; s.getTracks().forEach(t=>t.stop()); }
+async function startVideo(mode){ stopTracks(currentMedia.stream); let facing=mode==='rear'?{exact:'environment'}:'user'; let stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:640,height:480},audio:true}); currentMedia.stream=stream; localVideo.srcObject=stream; }
+document.getElementById('videoBtn').addEventListener('click', ()=> startVideo(camModeSel.value));
+camModeSel.addEventListener('change', ()=>{ if(localVideo.srcObject) startVideo(camModeSel.value); });
 </script>
 </body>
 </html>
