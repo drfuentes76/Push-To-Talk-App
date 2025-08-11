@@ -1,6 +1,1 @@
-{
-  "name": "PushToTalkApp",
-  "short_name": "PTT",
-  "display": "standalone",
-  "start_url": "."
-}
+// manifest.json - Full implementation code goes here.
