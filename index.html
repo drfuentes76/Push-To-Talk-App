@@ -1,1 +1,356 @@
-// index.html - Full implementation code goes here.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Push‑to‑Talk — Final Build</title>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;background:#f6f7fb;color:#111}
+  header{padding:12px 16px;background:#111;color:#fff;display:flex;justify-content:space-between;align-items:center}
+  main{padding:12px}
+  .primary{background:#2b6cff;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+  .accent{background:#10b981;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+  .danger{background:#ef4444;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+  .badge{background:#eee;border-radius:999px;padding:4px 10px;margin-left:8px}
+  #joinPanel,#appPanel{max-width:1200px;margin:0 auto}
+  #joinForm{display:grid;grid-template-columns:1fr;gap:10px;max-width:420px}
+  #appPanel{display:grid;grid-template-columns:320px 1fr;gap:12px;margin-top:16px}
+  .sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:78vh;overflow:auto}
+  .sidebar ul{list-style:none;margin:6px 0;padding:0}
+  .sidebar li{padding:6px;border-radius:8px}
+  .chat{display:flex;flex-direction:column;gap:8px}
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .log{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:40vh;overflow:auto}
+  .video-area{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
+  video{max-width:260px;border-radius:8px;border:1px solid #ddd;background:#000}
+  select, input[type=text]{padding:8px;border:1px solid #ccc;border-radius:8px}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .banner{background:#fffbeb;border:1px solid #fbbf24;color:#7c5500;padding:8px;border-radius:8px;margin:6px 0;display:none}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Push‑to‑Talk</h1>
+  <div>
+    <label for="camMode">Camera:</label>
+    <select id="camMode" aria-label="Camera mode">
+      <option value="front" selected>Front</option>
+      <option value="rear">Rear</option>
+      <option value="dual">Dual (front + rear)</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <section id="joinPanel">
+    <form id="joinForm" autocomplete="off">
+      <label for="nickname">Nickname</label>
+      <input id="nickname" type="text" required/>
+      <label for="statusSel">Status</label>
+      <select id="statusSel">
+        <option value="Online" selected>Online</option>
+        <option value="DND">Do Not Disturb</option>
+      </select>
+      <button type="submit" class="primary">Join Lobby</button>
+    </form>
+  </section>
+
+  <section id="appPanel" hidden>
+    <aside class="sidebar">
+      <h3>Users</h3>
+      <ul id="userList" aria-live="polite"></ul>
+      <h3>Rooms</h3>
+      <ul id="roomList" aria-live="polite"></ul>
+      <button id="createRoomBtn" class="primary">➕ Create Room</button>
+      <button id="inviteBtn" class="primary" style="margin-top:6px;">🔗 Invite</button>
+      <button id="backToLobbyBtn" class="primary" style="margin-top:6px;">⬅ Back to Lobby</button>
+      <hr/>
+      <button id="startEmergencyBtn" class="danger">🚨 Start Emergency</button>
+      <button id="stopEmergencyBtn" class="primary" disabled>🛑 Stop Emergency</button>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;"><input id="autoOpen" type="checkbox" checked/> Auto‑open maps on location</label>
+      <hr/>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;"><input id="accessMode" type="checkbox"/> Accessibility mode (screen reader / switch)</label>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;"><input id="pttToggleMode" type="checkbox"/> Push‑to‑Talk toggle (instead of hold)</label>
+      <div class="sr-only" aria-live="assertive" id="srAnnounce"></div>
+    </aside>
+
+    <section class="chat">
+      <div class="banner" id="vcBanner"></div>
+      <div class="toolbar">
+        <button id="pttBtn" aria-pressed="false" aria-label="Push to talk. Shortcut Space" class="accent">🎤 Hold to Talk</button>
+        <button id="voiceNoteBtn" aria-label="Record voice memo. Shortcut V">🎙 Voice Memo</button>
+        <button id="fileBtn">📎 File</button>
+        <button id="locationBtn">📍 Share Location</button>
+        <button id="vcStartBtn">📹 Start Video Conf</button>
+        <button id="vcStopBtn" disabled>🛑 End Video</button>
+        <span id="scopeBadge" class="badge">Lobby</span>
+      </div>
+
+      <div class="video-area" id="videoArea">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <div id="remoteVideos"></div>
+      </div>
+
+      <div id="log" role="log" aria-live="polite" tabindex="0" class="log"></div>
+
+      <div class="composer">
+        <input id="msgInput" type="text" placeholder="Message…"/>
+        <button id="sendBtn" class="primary">Send</button>
+      </div>
+    </section>
+  </section>
+</main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+function announce(msg){ const n=document.getElementById('srAnnounce'); n.textContent=''; setTimeout(()=>{ n.textContent=msg; }, 10); }
+function log(t){ const d=document.createElement('div'); d.textContent=t; const l=document.getElementById('log'); l.append(d); l.scrollTop=l.scrollHeight; announce(t); }
+function isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent); }
+function isAndroid(){ return /Android/.test(navigator.userAgent); }
+function openNativeMaps(lat, lon, label='Location'){
+  const enc=encodeURIComponent(label);
+  if(isIOS()){ const url=`maps://?q=${enc}&ll=${lat},${lon}`; const t=setTimeout(()=>window.open(`http://maps.apple.com/?q=${enc}&ll=${lat},${lon}`,'_blank'),300); window.location.href=url; setTimeout(()=>clearTimeout(t),1000); return; }
+  if(isAndroid()){ window.location.href=`geo:${lat},${lon}?q=${lat},${lon}(${enc})`; return; }
+  window.open(`https://www.google.com/maps?q=${lat},${lon}(${enc})`,'_blank');
+}
+
+const socket = io({ path:'/socket.io', transports:['websocket','polling'], reconnection:true, reconnectionAttempts: 9999, reconnectionDelay: 500 });
+let me=null; let scope={ type:'lobby', roomId:null, name:null };
+
+document.getElementById('joinForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const name=document.getElementById('nickname').value.trim(); if(!name) return;
+  localStorage.setItem('ptt_nickname', name);
+  socket.emit('join',{ name, status: document.getElementById('statusSel').value, avatar:null });
+});
+
+socket.on('joined', ({me:info})=>{
+  me=info; document.getElementById('joinPanel').hidden=true; document.getElementById('appPanel').hidden=false; log('Joined as '+me.name);
+  const saved=localStorage.getItem('last_room'); const m=location.pathname.match(/\/room\/(.+)$/); const target = (m && m[1]) ? m[1] : saved;
+  if(target) socket.emit('switch-room',{ roomId: target });
+});
+
+socket.on('update-user-list', users=>{
+  const ul=document.getElementById('userList'); ul.innerHTML='';
+  users.forEach(u=>{ const li=document.createElement('li'); li.dataset.id=u.id; li.textContent=u.name+' — '+u.status; ul.append(li); });
+});
+
+socket.on('room-list', rooms=>{
+  const ul=document.getElementById('roomList'); ul.innerHTML='';
+  rooms.forEach(r=>{ const li=document.createElement('li'); li.textContent=r.name+' ('+r.members.length+')'+(r.pinned?' 📌':''); li.onclick=()=>socket.emit('switch-room',{ roomId:r.id }); ul.append(li); });
+});
+
+socket.on('scope', s=>{
+  scope=s; document.getElementById('scopeBadge').textContent = s.type==='lobby' ? 'Lobby' : ('Room: '+s.name);
+  if(s.url && location.pathname!==s.url) history.replaceState({}, s.name, s.url);
+  localStorage.setItem('last_room', s.roomId||'');
+  log('Switched to '+document.getElementById('scopeBadge').textContent);
+});
+
+// Invite button: copy current URL
+document.getElementById('inviteBtn').addEventListener('click', async ()=>{
+  const url = location.href;
+  try{ await navigator.clipboard.writeText(url); log('Invite link copied to clipboard'); }catch{ prompt('Copy invite link:', url); }
+});
+
+// Files (chunked)
+const CHUNK = 64 * 1024;
+document.getElementById('fileBtn').addEventListener('click', ()=>{
+  const i=document.createElement('input'); i.type='file';
+  i.onchange=async()=>{
+    const f=i.files[0]; if(!f) return;
+    const fileId='f_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    socket.emit('file-meta',{ roomId: scope.roomId, name:f.name, size:f.size, fileId });
+    const buf = await f.arrayBuffer(); const u8=new Uint8Array(buf);
+    for(let off=0, seq=0; off<u8.length; off+=CHUNK, seq++){
+      socket.emit('file-chunk',{ roomId: scope.roomId, fileId, seq, chunk: Array.from(u8.slice(off, off+CHUNK)) });
+    }
+    socket.emit('file-complete',{ roomId: scope.roomId, fileId });
+  };
+  i.click();
+});
+const fileBuffers=new Map();
+socket.on('file-meta', ({from,name,size,fileId})=>{ fileBuffers.set(fileId,{name,chunks:[],size}); log(`${from} is sending “${name}” (${size} bytes)`); });
+socket.on('file-chunk', ({fileId,seq,chunk})=>{ const e=fileBuffers.get(fileId); if(!e) return; e.chunks[seq]=new Uint8Array(chunk); });
+socket.on('file-complete', ({fileId})=>{ const e=fileBuffers.get(fileId); if(!e) return; const blob=new Blob(e.chunks,{type:'application/octet-stream'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=e.name; a.textContent='Download '+e.name; document.getElementById('log').append(a); fileBuffers.delete(fileId); });
+
+// Text
+document.getElementById('sendBtn').addEventListener('click', ()=>{ const input=document.getElementById('msgInput'); const text=input.value.trim(); if(!text) return; socket.emit('message',{ roomId: scope.roomId, text }); input.value=''; });
+socket.on('message', ({from,text})=> log(from+': '+text));
+
+// Location / Emergency
+document.getElementById('locationBtn').addEventListener('click', ()=>{
+  navigator.geolocation.getCurrentPosition(pos=>{ socket.emit('location',{ roomId: scope.roomId, lat: pos.coords.latitude, lon: pos.coords.longitude }); }, err=> log('Location error: '+err.message));
+});
+socket.on('location', ({from,lat,lon})=>{ log(`${from} shared location: ${lat.toFixed(5)}, ${lon.toFixed(5)}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(lat,lon, from+"'s location"); } });
+
+let emergencyTimer=null;
+document.getElementById('startEmergencyBtn').addEventListener('click', ()=>{
+  log('🚨 Emergency started'); socket.emit('emergency-stream',{ roomId: scope.roomId, action:'start' });
+  emergencyTimer=setInterval(()=>{ navigator.geolocation.getCurrentPosition(pos=>{ socket.emit('emergency-stream',{ roomId: scope.roomId, action:'gps', meta:{ lat:pos.coords.latitude, lon:pos.coords.longitude } }); }, ()=>{}); }, 4000);
+  document.getElementById('startEmergencyBtn').disabled=true; document.getElementById('stopEmergencyBtn').disabled=false;
+});
+document.getElementById('stopEmergencyBtn').addEventListener('click', ()=>{
+  if(emergencyTimer) clearInterval(emergencyTimer); socket.emit('emergency-stream',{ roomId: scope.roomId, action:'stop' }); log('🛑 Emergency stopped'); document.getElementById('startEmergencyBtn').disabled=false; document.getElementById('stopEmergencyBtn').disabled=true;
+});
+socket.on('emergency-signal', ({from,action,meta})=>{
+  if(action==='start') log(`🚨 Emergency from ${from.name}`);
+  if(action==='gps'&&meta){ log(`GPS from ${from.name}: ${meta.lat.toFixed(5)}, ${meta.lon.toFixed(5)}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(meta.lat, meta.lon, from.name+' emergency'); } }
+  if(action==='stop') log(`🛑 Emergency ended by ${from.name}`);
+});
+
+// Voice memos
+let memoRecorder=null, memoChunks=[];
+document.getElementById('voiceNoteBtn').addEventListener('click', async ()=>{
+  if(!memoRecorder || memoRecorder.state==='inactive'){
+    const s=await navigator.mediaDevices.getUserMedia({audio:true});
+    memoChunks=[]; memoRecorder=new MediaRecorder(s);
+    memoRecorder.ondataavailable=e=>{ if(e.data&&e.data.size) memoChunks.push(e.data); };
+    memoRecorder.onstop=async()=>{ const b=new Blob(memoChunks,{type: memoRecorder.mimeType||'audio/webm'}); const arr=Array.from(new Uint8Array(await b.arrayBuffer())); socket.emit('voice-memo',{ roomId: scope.roomId, data: arr, mime:b.type }); log('Voice memo sent'); };
+    memoRecorder.start();
+    log('Recording voice memo… Tap again to stop.');
+  } else { memoRecorder.stop(); }
+});
+socket.on('voice-memo', ({from,data,mime})=>{ const blob=new Blob([new Uint8Array(data)],{type:mime||'audio/webm'}); const a=document.createElement('audio'); a.controls=true; a.src=URL.createObjectURL(blob); const row=document.createElement('div'); row.textContent=from+' sent a voice memo '; row.append(a); document.getElementById('log').append(row); });
+
+// PTT (live)
+const pttBtn=document.getElementById('pttBtn');
+const accessMode=document.getElementById('accessMode');
+const pttToggleMode=document.getElementById('pttToggleMode');
+let pttRecorder=null, pttSeq=0, pttActive=false;
+
+async function pttStart(){
+  if(pttActive) return;
+  const s=await navigator.mediaDevices.getUserMedia({audio:true});
+  pttActive=true; pttSeq=0; pttBtn.setAttribute('aria-pressed','true'); pttBtn.textContent='🛑 Release to Stop';
+  socket.emit('ptt-start',{ roomId: scope.roomId });
+  pttRecorder=new MediaRecorder(s);
+  pttRecorder.ondataavailable=async(e)=>{
+    if(e.data && e.data.size){
+      const u8=new Uint8Array(await e.data.arrayBuffer());
+      socket.emit('ptt-chunk',{ roomId: scope.roomId, seq: pttSeq++, data: Array.from(u8), mime: pttRecorder.mimeType||'audio/webm' });
+    }
+  };
+  pttRecorder.start(250);
+}
+function pttStop(){
+  if(!pttActive) return;
+  pttActive=false; pttBtn.setAttribute('aria-pressed','false'); pttBtn.textContent='🎤 Hold to Talk';
+  socket.emit('ptt-stop',{ roomId: scope.roomId });
+  if(pttRecorder){ try{ pttRecorder.stop(); }catch{} }
+}
+function bindPTT(){
+  pttBtn.onmousedown = (e)=>{ if(pttToggleMode.checked||accessMode.checked) return; pttStart(); };
+  pttBtn.onmouseup   = (e)=>{ if(pttToggleMode.checked||accessMode.checked) return; pttStop(); };
+  pttBtn.ontouchstart= (e)=>{ if(pttToggleMode.checked||accessMode.checked) return; e.preventDefault(); pttStart(); };
+  pttBtn.ontouchend  = (e)=>{ if(pttToggleMode.checked||accessMode.checked) return; e.preventDefault(); pttStop(); };
+  pttBtn.onclick = ()=>{ if(accessMode.checked || pttToggleMode.checked){ pttActive?pttStop():pttStart(); } };
+  document.addEventListener('keydown', (e)=>{
+    if((e.key===' ' || e.code==='Space') && !e.repeat && document.activeElement.id!=='msgInput'){
+      if(pttToggleMode.checked || accessMode.checked){ e.preventDefault(); pttActive?pttStop():pttStart(); }
+      else { e.preventDefault(); pttStart(); }
+    }
+    if((e.key==='v' || e.key==='V') && !e.repeat){ document.getElementById('voiceNoteBtn').click(); }
+  });
+  document.addEventListener('keyup', (e)=>{
+    if((e.key===' ' || e.code==='Space') && !pttToggleMode.checked && !accessMode.checked){ e.preventDefault(); pttStop(); }
+  });
+}
+bindPTT();
+
+const pttQueue=[]; let pttPlaying=false;
+socket.on('ptt-indicator', ({from,action})=>{ log((action==='start'?'🎙 ':'⏹ ')+from+' '+(action==='start'?'is talking':'stopped')); });
+socket.on('ptt-chunk', ({seq,data,mime})=>{
+  const blob=new Blob([new Uint8Array(data)],{type:mime||'audio/webm'});
+  const url=URL.createObjectURL(blob); pttQueue.push(url);
+  if(!pttPlaying) playNextPTT();
+});
+async function playNextPTT(){
+  if(!pttQueue.length){ pttPlaying=false; return; }
+  pttPlaying=true;
+  const src=pttQueue.shift();
+  const a=new Audio(src);
+  try{ await a.play(); a.onended=()=>{ URL.revokeObjectURL(src); playNextPTT(); }; }
+  catch(e){ log('🔈 Tap anywhere to enable audio'); pttPlaying=false; }
+}
+
+// WebRTC VC
+const pcConfig = { iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] };
+const peers = new Map();
+let localStream=null;
+const banner=document.getElementById('vcBanner');
+
+function showBanner(msg){ banner.textContent=msg; banner.style.display='block'; setTimeout(()=>banner.style.display='none', 4000); }
+function addRemoteVideo(peerId, stream){ let el=document.getElementById('rv_'+peerId); if(!el){ el=document.createElement('video'); el.id='rv_'+peerId; el.autoplay=true; el.playsInline=true; document.getElementById('remoteVideos').append(el); } el.srcObject=stream; }
+function removeRemoteVideo(peerId){ const el=document.getElementById('rv_'+peerId); if(el){ if(el.srcObject) el.srcObject.getTracks().forEach(t=>t.stop()); el.remove(); } }
+function ensurePC(peerId){ if(peers.has(peerId)) return peers.get(peerId); const pc=new RTCPeerConnection(pcConfig); pc.onicecandidate=(e)=>{ if(e.candidate) socket.emit('signal',{ to: peerId, data:{ type:'candidate', candidate:e.candidate } }); }; pc.ontrack=(e)=> addRemoteVideo(peerId, e.streams[0]); peers.set(peerId, pc); return pc; }
+
+async function startLocal(){
+  if(localStream) return localStream;
+  const mode=document.getElementById('camMode').value;
+  if(mode==='dual'){
+    const rear = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{exact:'environment'}, width:640, height:480 }, audio:false }).catch(()=>null);
+    const front= await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:640, height:480 }, audio:false }).catch(()=>null);
+    if(rear && front){
+      const vR=document.createElement('video'); vR.srcObject=rear; vR.muted=true; await vR.play().catch(()=>{});
+      const vF=document.createElement('video'); vF.srcObject=front; vF.muted=true; await vF.play().catch(()=>{});
+      const c=document.createElement('canvas'); c.width=640*2; c.height=480; const ctx=c.getContext('2d'); (function draw(){ ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(vR,0,0,640,480); ctx.drawImage(vF,640,0,640,480); requestAnimationFrame(draw); })(); localStream=c.captureStream(24);
+    } else { localStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:640, height:480 }, audio:true }); }
+  } else {
+    const facing = mode==='rear'?{exact:'environment'}:'user';
+    localStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:facing, width:640, height:480 }, audio:true });
+  }
+  document.getElementById('localVideo').srcObject = localStream;
+  return localStream;
+}
+function stopLocal(){ if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null; document.getElementById('localVideo').srcObject=null; } }
+
+async function callPeers(peerIds){
+  const stream = await startLocal();
+  for(const id of peerIds){
+    const pc = ensurePC(id);
+    const existing = new Set(pc.getSenders().map(s=>s.track && s.track.id));
+    stream.getTracks().forEach(t=>{ if(!existing.has(t.id)) pc.addTrack(t, stream); });
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    socket.emit('signal', { to: id, data: { type: 'offer', sdp: offer } });
+  }
+}
+function hangup(){ peers.forEach((pc,id)=>{ pc.getSenders().forEach(s=>pc.removeTrack(s)); pc.close(); removeRemoteVideo(id); }); peers.clear(); stopLocal(); }
+
+document.getElementById('vcStartBtn').addEventListener('click', ()=>{ socket.emit('vc-start', { roomId: scope.roomId }); document.getElementById('vcStartBtn').disabled=true; document.getElementById('vcStopBtn').disabled=false; });
+document.getElementById('vcStopBtn').addEventListener('click', ()=>{ socket.emit('vc-stop', { roomId: scope.roomId }); hangup(); document.getElementById('vcStartBtn').disabled=false; document.getElementById('vcStopBtn').disabled=true; });
+
+socket.on('vc-started', async ({starterId, roomId, members})=>{ if(starterId!==me?.id) showBanner('📹 Video conference started'); log('Video conference started'); if(starterId===me?.id){ await callPeers(members); }});
+socket.on('vc-stopped', ({starterId})=>{ showBanner('📹 Video conference ended'); log('Video conference ended'); hangup(); });
+socket.on('vc-present', async ({roomId, peers})=>{ log('Joining active video conference…'); await callPeers(peers); });
+
+socket.on('signal', async ({from, data})=>{
+  const pc = ensurePC(from);
+  if(data.type==='offer'){
+    const stream = await startLocal();
+    const existing = new Set(pc.getSenders().map(s=>s.track && s.track.id));
+    stream.getTracks().forEach(t=>{ if(!existing.has(t.id)) pc.addTrack(t, stream); });
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+    socket.emit('signal', { to: from, data: { type: 'answer', sdp: ans } });
+  } else if(data.type==='answer'){
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+  } else if(data.type==='candidate'){
+    try{ await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }catch(e){ console.warn(e); }
+  }
+});
+
+// Rooms
+document.getElementById('createRoomBtn').addEventListener('click', ()=>{
+  const ids=[...document.querySelectorAll('#userList li[data-id]')].map(li=>li.getAttribute('data-id')).filter(id=>id!==socket.id);
+  socket.emit('create-room',{ name:'Room '+Math.random().toString(36).slice(2,6), memberIds: ids, pinned:true });
+});
+document.getElementById('backToLobbyBtn').addEventListener('click', ()=>{
+  if(scope.type==='lobby') return;
+  history.replaceState({}, 'Lobby', '/'); socket.emit('switch-room',{ roomId: null });
+  scope = { type:'lobby', roomId:null, name:null }; document.getElementById('scopeBadge').textContent='Lobby'; log('Returned to Lobby');
+});
+</script>
+</body>
+</html>
