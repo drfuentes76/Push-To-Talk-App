@@ -1,4 +1,3 @@
-// server.js — dual‑camera + emergency streaming support
 const path = require('path');
 const express = require('express');
 const http = require('http');
@@ -6,7 +5,7 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, { cors: { origin: '*' }, maxHttpBufferSize: 1e8 });
 const PORT = process.env.PORT || 3000;
 
 app.use(express.static(__dirname));
@@ -41,17 +40,20 @@ io.on('connection', (socket) => {
     else io.to('lobby').emit('message', payload);
   });
 
-  socket.on('typing', ({ scope, roomId, typing }) => {
-    const u = users.get(socket.id); if (!u || !typing) return;
-    if (scope === 'room' && roomId) io.to(roomId).emit('typing', { name: u.name });
-    else socket.to('lobby').emit('typing', { name: u.name });
-  });
-
-  socket.on('file', ({ scope, roomId, name, data }) => {
+  // chunked file transfer
+  socket.on('file-meta', ({ scope, roomId, name, size, fileId }) => {
     const u = users.get(socket.id); if (!u) return;
-    const payload = { from: u.name, name, data };
-    if (scope === 'room' && roomId) io.to(roomId).emit('file', payload);
-    else io.to('lobby').emit('file', payload);
+    const meta = { from: u.name, name, size, fileId };
+    if (scope === 'room' && roomId) io.to(roomId).emit('file-meta', meta);
+    else io.to('lobby').emit('file-meta', meta);
+  });
+  socket.on('file-chunk', ({ scope, roomId, fileId, seq, chunk }) => {
+    if (scope === 'room' && roomId) io.to(roomId).emit('file-chunk', { fileId, seq, chunk });
+    else io.to('lobby').emit('file-chunk', { fileId, seq, chunk });
+  });
+  socket.on('file-complete', ({ scope, roomId, fileId }) => {
+    if (scope === 'room' && roomId) io.to(roomId).emit('file-complete', { fileId });
+    else io.to('lobby').emit('file-complete', { fileId });
   });
 
   socket.on('voice', ({ scope, roomId, data, mime }) => {
@@ -68,13 +70,11 @@ io.on('connection', (socket) => {
     else io.to('lobby').emit('location', payload);
   });
 
-  // --- Emergency signaling (broadcast to all except sender by default) ---
   socket.on('emergency-stream', ({ targetIds = [], action, meta }) => {
     const targets = targetIds.length ? targetIds : Array.from(io.sockets.sockets.keys()).filter(id => id !== socket.id);
     targets.forEach(id => io.to(id).emit('emergency-signal', { from: users.get(socket.id), action, meta }));
   });
 
-  // --- Rooms + invites ---
   socket.on('create-room', ({ name, memberIds = [], pinned = true }) => {
     const id = 'room_' + Math.random().toString(36).slice(2, 9);
     rooms.set(id, { id, name: name || 'Room', owner: socket.id, members: [socket.id], pinned });
@@ -113,6 +113,20 @@ io.on('connection', (socket) => {
     for (const rid of socket.rooms) if (rid !== socket.id) socket.leave(rid);
     socket.join(roomId);
     socket.emit('scope', { type: 'room', roomId, name: r.name, url: `/room/${roomId}` });
+  });
+
+  // video conf signaling
+  socket.on('vc-start', ({ roomId }) => {
+    const r = rooms.get(roomId);
+    const members = r ? r.members.filter(id => id !== socket.id) : [...io.sockets.sockets.keys()].filter(id => id !== socket.id);
+    io.to(roomId || 'lobby').emit('vc-started', { starterId: socket.id, roomId, members });
+  });
+  socket.on('vc-stop', ({ roomId }) => {
+    io.to(roomId || 'lobby').emit('vc-stopped', { starterId: socket.id, roomId });
+  });
+
+  socket.on('signal', ({ to, data }) => {
+    if (io.sockets.sockets.get(to)) io.to(to).emit('signal', { from: socket.id, data });
   });
 
   socket.on('disconnect', () => {

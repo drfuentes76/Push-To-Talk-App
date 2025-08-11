@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Push‑to‑Talk — Dual Cam + Emergency</title>
+<title>Push‑to‑Talk — Patch v2 (fresh)</title>
 <style>
   body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;background:#f6f7fb;color:#111}
   header{padding:12px 16px;background:#111;color:#fff;display:flex;justify-content:space-between;align-items:center}
@@ -15,16 +15,17 @@
   #joinPanel,#appPanel{max-width:1200px;margin:0 auto}
   #joinForm{display:grid;grid-template-columns:1fr;gap:10px;max-width:420px}
   #appPanel{display:grid;grid-template-columns:320px 1fr;gap:12px;margin-top:16px}
-  .sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:75vh;overflow:auto}
+  .sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:78vh;overflow:auto}
   .sidebar ul{list-style:none;margin:6px 0;padding:0}
   .sidebar li{padding:6px;border-radius:8px}
   .chat{display:flex;flex-direction:column;gap:8px}
   .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-  .log{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:40vh;overflow:auto}
+  .log{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;height:42vh;overflow:auto}
   .video-area{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
   video{max-width:260px;border-radius:8px;border:1px solid #ddd;background:#000}
   select, input[type=text]{padding:8px;border:1px solid #ccc;border-radius:8px}
   button:disabled{opacity:.5;cursor:not-allowed}
+  .banner{background:#fffbeb;border:1px solid #fbbf24;color:#7c5500;padding:8px;border-radius:8px;margin:6px 0;display:none}
 </style>
 </head>
 <body>
@@ -63,23 +64,26 @@
       <button id="createRoomBtn" class="primary">➕ Create Room</button>
       <button id="backToLobbyBtn" class="primary" style="margin-top:6px;">⬅ Back to Lobby</button>
       <hr/>
-      <button id="startEmergencyBtn" class="danger">🚨 Start Emergency (video+GPS)</button>
+      <button id="startEmergencyBtn" class="danger">🚨 Start Emergency</button>
       <button id="stopEmergencyBtn" class="primary" disabled>🛑 Stop Emergency</button>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;"><input id="autoOpen" type="checkbox" checked/> Auto‑open maps on location</label>
     </aside>
 
     <section class="chat">
+      <div class="banner" id="vcBanner"></div>
       <div class="toolbar">
         <button id="pttBtn" class="accent">🎤 Hold to Talk</button>
         <button id="voiceNoteBtn">🎙 Voice Note</button>
         <button id="fileBtn">📎 File</button>
         <button id="locationBtn">📍 Share Location</button>
-        <button id="videoBtn">📹 Start Video</button>
-        <button id="endVideoBtn" disabled>🛑 End Video</button>
+        <button id="vcStartBtn">📹 Start Video Conf</button>
+        <button id="vcStopBtn" disabled>🛑 End Video</button>
         <span id="scopeBadge" class="badge">Lobby</span>
       </div>
 
-      <div class="video-area">
+      <div class="video-area" id="videoArea">
         <video id="localVideo" autoplay muted playsinline></video>
+        <div id="remoteVideos"></div>
       </div>
 
       <div id="log" role="log" aria-live="polite" tabindex="0" class="log"></div>
@@ -94,143 +98,155 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-function addLog(t){ const d=document.createElement('div'); d.textContent=t; const log=document.getElementById('log'); log.appendChild(d); log.scrollTop=log.scrollHeight; }
-function saveBlob(name,blob){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1500); }
-const socket = io({ path:'/socket.io', transports:['websocket','polling'], reconnection:true });
-let me={}; let scope={ type:'lobby', roomId:null };
+function log(t){ const d=document.createElement('div'); d.textContent=t; const l=document.getElementById('log'); l.append(d); l.scrollTop=l.scrollHeight; }
+function saveBlob(name, blob){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 1500); }
+function isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent); }
+function isAndroid(){ return /Android/.test(navigator.userAgent); }
+function openNativeMaps(lat, lon, label='Location'){
+  const enc=encodeURIComponent(label);
+  if(isIOS()){ const url=`maps://?q=${enc}&ll=${lat},${lon}`; const t=setTimeout(()=>window.open(`http://maps.apple.com/?q=${enc}&ll=${lat},${lon}`,'_blank'),300); window.location.href=url; setTimeout(()=>clearTimeout(t),1000); return; }
+  if(isAndroid()){ window.location.href=`geo:${lat},${lon}?q=${lat},${lon}(${enc})`; return; }
+  window.open(`https://www.google.com/maps?q=${lat},${lon}(${enc})`,'_blank');
+}
 
-// Join
+const socket = io({ path:'/socket.io', transports:['websocket','polling'], reconnection:true });
+let me=null; let scope={ type:'lobby', roomId:null, name:null };
+
 document.getElementById('joinForm').addEventListener('submit', e=>{
   e.preventDefault();
   const name=document.getElementById('nickname').value.trim(); if(!name) return;
   socket.emit('join',{ name, status: document.getElementById('statusSel').value, avatar:null });
 });
-socket.on('joined', ({me:info})=>{ me=info; document.getElementById('joinPanel').hidden=true; document.getElementById('appPanel').hidden=false; addLog('Joined as '+me.name); });
 
-// Lists / scope
+socket.on('joined', ({me:info})=>{
+  me=info; document.getElementById('joinPanel').hidden=true; document.getElementById('appPanel').hidden=false; log('Joined as '+me.name);
+});
+
 socket.on('update-user-list', users=>{
   const ul=document.getElementById('userList'); ul.innerHTML='';
   users.forEach(u=>{ const li=document.createElement('li'); li.dataset.id=u.id; li.textContent=u.name+' — '+u.status; ul.append(li); });
 });
+
 socket.on('room-list', rooms=>{
   const ul=document.getElementById('roomList'); ul.innerHTML='';
   rooms.forEach(r=>{ const li=document.createElement('li'); li.textContent=r.name+' ('+r.members.length+')'+(r.pinned?' 📌':''); li.onclick=()=>socket.emit('switch-room',{ roomId:r.id }); ul.append(li); });
 });
+
 socket.on('scope', s=>{
-  scope=s; document.getElementById('scopeBadge').textContent=s.type==='lobby'?'Lobby':('Room: '+s.name);
+  scope=s; document.getElementById('scopeBadge').textContent = s.type==='lobby' ? 'Lobby' : ('Room: '+s.name);
   if(s.url && location.pathname!==s.url) history.replaceState({}, s.name, s.url);
-  addLog('Switched to '+document.getElementById('scopeBadge').textContent);
+  log('Switched to '+document.getElementById('scopeBadge').textContent);
 });
 
-// Messaging
-document.getElementById('sendBtn').addEventListener('click', ()=>{
-  const input=document.getElementById('msgInput'); const text=input.value.trim(); if(!text) return;
-  socket.emit('message',{ scope: scope.type, roomId: scope.roomId, text }); input.value='';
-});
-socket.on('message', ({from,text})=> addLog(from+': '+text));
-
-// Files
+// ---------- Chunked Files ----------
+const CHUNK = 64 * 1024;
 document.getElementById('fileBtn').addEventListener('click', ()=>{
   const i=document.createElement('input'); i.type='file';
-  i.onchange=async()=>{ const f=i.files[0]; if(!f) return; const buf=await f.arrayBuffer(); socket.emit('file',{ scope: scope.type, roomId: scope.roomId, name:f.name, data:Array.from(new Uint8Array(buf)) }); };
+  i.onchange=async()=>{
+    const f=i.files[0]; if(!f) return;
+    const fileId='f_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    socket.emit('file-meta',{ scope: scope.type, roomId: scope.roomId, name:f.name, size:f.size, fileId });
+    const buf = await f.arrayBuffer(); const u8=new Uint8Array(buf);
+    for(let off=0, seq=0; off<u8.length; off+=CHUNK, seq++){
+      socket.emit('file-chunk',{ scope: scope.type, roomId: scope.roomId, fileId, seq, chunk: Array.from(u8.slice(off, off+CHUNK)) });
+    }
+    socket.emit('file-complete',{ scope: scope.type, roomId: scope.roomId, fileId });
+  };
   i.click();
 });
-socket.on('file', ({from,name,data})=>{
-  addLog(from+' sent file '+name); const blob=new Blob([new Uint8Array(data)]); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.textContent='Download'; document.getElementById('log').append(a);
-});
+const fileBuffers=new Map();
+socket.on('file-meta', ({from,name,size,fileId})=>{ fileBuffers.set(fileId,{name,chunks:[],size}); log(`${from} is sending “${name}” (${size} bytes)`); });
+socket.on('file-chunk', ({fileId,seq,chunk})=>{ const e=fileBuffers.get(fileId); if(!e) return; e.chunks[seq]=new Uint8Array(chunk); });
+socket.on('file-complete', ({fileId})=>{ const e=fileBuffers.get(fileId); if(!e) return; const blob=new Blob(e.chunks,{type:'application/octet-stream'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=e.name; a.textContent='Download '+e.name; document.getElementById('log').append(a); fileBuffers.delete(fileId); });
 
-// Location
+// ---------- Messaging ----------
+document.getElementById('sendBtn').addEventListener('click', ()=>{ const input=document.getElementById('msgInput'); const text=input.value.trim(); if(!text) return; socket.emit('message',{ scope: scope.type, roomId: scope.roomId, text }); input.value=''; });
+socket.on('message', ({from,text})=> log(from+': '+text));
+
+// ---------- Location / Emergency ----------
 document.getElementById('locationBtn').addEventListener('click', ()=>{
   navigator.geolocation.getCurrentPosition(pos=>{
     socket.emit('location',{ scope: scope.type, roomId: scope.roomId, lat: pos.coords.latitude, lon: pos.coords.longitude });
-  }, err=> addLog('Location error: '+err.message));
+  }, err=> log('Location error: '+err.message));
 });
-socket.on('location', ({from,lat,lon})=> addLog(`${from} shared location: ${lat.toFixed(5)}, ${lon.toFixed(5)}`));
+socket.on('location', ({from,lat,lon})=>{ log(`${from} shared location: ${lat.toFixed(5)}, ${lon.toFixed(5)}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(lat,lon, from+"'s location"); } });
 
-// Voice note / PTT
-let mediaRecorder=null, chunks=[];
-const pttBtn=document.getElementById('pttBtn');
-pttBtn.addEventListener('mousedown', startRec); pttBtn.addEventListener('touchstart', startRec);
-pttBtn.addEventListener('mouseup', stopRec);    pttBtn.addEventListener('touchend', stopRec);
-document.getElementById('voiceNoteBtn').addEventListener('click', async()=>{
-  const s=await navigator.mediaDevices.getUserMedia({audio:true}); chunks=[]; mediaRecorder=new MediaRecorder(s);
-  mediaRecorder.ondataavailable=e=>chunks.push(e.data);
-  mediaRecorder.onstop=async()=>{ const b=new Blob(chunks,{type: mediaRecorder.mimeType||'audio/webm'}); const arr=Array.from(new Uint8Array(await b.arrayBuffer())); socket.emit('voice',{ scope: scope.type, roomId: scope.roomId, data: arr, mime:b.type }); };
-  mediaRecorder.start(); setTimeout(()=>mediaRecorder.stop(), 1500);
-});
-async function startRec(){ const s=await navigator.mediaDevices.getUserMedia({audio:true}); chunks=[]; mediaRecorder=new MediaRecorder(s); mediaRecorder.ondataavailable=e=>chunks.push(e.data); mediaRecorder.onstop=async()=>{ const b=new Blob(chunks,{type: mediaRecorder.mimeType||'audio/webm'}); const arr=Array.from(new Uint8Array(await b.arrayBuffer())); socket.emit('voice',{ scope: scope.type, roomId: scope.roomId, data: arr, mime:b.type }); }; mediaRecorder.start(); }
-function stopRec(){ if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); }
-socket.on('voice', ({from,data,mime})=>{ addLog(from+' sent a voice clip'); const blob=new Blob([new Uint8Array(data)],{type:mime||'audio/webm'}); const a=document.createElement('audio'); a.controls=true; a.src=URL.createObjectURL(blob); const btn=document.createElement('button'); btn.textContent='Save'; btn.onclick=()=>saveBlob('voice_'+Date.now()+'.webm',blob); const row=document.createElement('div'); row.append(a,btn); document.getElementById('log').append(row); });
-
-// ----- Video: front / rear / dual (canvas mix) -----
-const localVideo=document.getElementById('localVideo');
-const camModeSel=document.getElementById('camMode');
-const startBtn=document.getElementById('videoBtn');
-const endBtn=document.getElementById('endVideoBtn');
-let current={ mic:null, v1:null, v2:null, mixed:null, raf:null };
-
-function stopTracks(s){ if(!s) return; s.getTracks().forEach(t=>t.stop()); }
-function clearVideo(){ stopTracks(current.mic); stopTracks(current.v1); stopTracks(current.v2); stopTracks(current.mixed); if(current.raf) cancelAnimationFrame(current.raf); current={ mic:null, v1:null, v2:null, mixed:null, raf:null }; localVideo.srcObject=null; }
-async function getCam(facing){ return navigator.mediaDevices.getUserMedia({ video:{ facingMode:facing, width:640, height:480, frameRate:24 }, audio:false }); }
-async function startDual(){
-  const rear = await getCam({exact:'environment'}).catch(()=>null);
-  const front= await getCam('user').catch(()=>null);
-  if(!rear || !front) return null;
-  const vR=document.createElement('video'); vR.muted=true; vR.srcObject=rear; await vR.play().catch(()=>{});
-  const vF=document.createElement('video'); vF.muted=true; vF.srcObject=front; await vF.play().catch(()=>{});
-  const w=480,h=360; const c=document.createElement('canvas'); c.width=w*2; c.height=h; const ctx=c.getContext('2d');
-  const draw=()=>{ ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(vR,0,0,w,h); ctx.drawImage(vF,w,0,w,h); current.raf=requestAnimationFrame(draw); }; draw();
-  const out=c.captureStream(24);
-  current.v1=rear; current.v2=front; current.mixed=out;
-  return out;
-}
-async function startVideo(mode){
-  clearVideo();
-  current.mic = await navigator.mediaDevices.getUserMedia({audio:true}).catch(()=>null);
-  if(mode==='dual'){
-    const mixed = await startDual();
-    if(!mixed){ // fallback to single cam front
-      const single = await getCam('user'); current.v1=single; const out=new MediaStream(single.getTracks()); if(current.mic) current.mic.getTracks().forEach(t=>out.addTrack(t)); localVideo.srcObject=out; startBtn.disabled=true; endBtn.disabled=false; addLog('Video started (fallback single cam)'); return;
-    }
-    if(current.mic) current.mic.getTracks().forEach(t=>mixed.addTrack(t));
-    localVideo.srcObject=mixed; startBtn.disabled=true; endBtn.disabled=false; addLog('Video started (dual camera)');
-    return;
-  }
-  const facing = mode==='rear'?{exact:'environment'}:'user';
-  const cam = await getCam(facing); current.v1=cam;
-  const out = new MediaStream(cam.getTracks()); if(current.mic) current.mic.getTracks().forEach(t=>out.addTrack(t));
-  localVideo.srcObject=out; startBtn.disabled=true; endBtn.disabled=false; addLog('Video started ('+mode+')');
-}
-function endVideo(){ clearVideo(); startBtn.disabled=false; endBtn.disabled=true; addLog('Video stopped'); }
-startBtn.addEventListener('click', ()=> startVideo(camModeSel.value));
-endBtn.addEventListener('click', endVideo);
-camModeSel.addEventListener('change', ()=>{ if(localVideo.srcObject) { endVideo(); startVideo(camModeSel.value); } });
-
-// ----- Emergency: live mic+video + GPS pings -----
-let emergencyTicker=null;
-document.getElementById('startEmergencyBtn').addEventListener('click', async()=>{
-  addLog('🚨 Emergency started (sharing GPS + starting local video)');
-  socket.emit('emergency-stream',{ action:'start' });
-  if(!localVideo.srcObject){ await startVideo(camModeSel.value); }
-  emergencyTicker = setInterval(()=>{
-    navigator.geolocation.getCurrentPosition(pos=>{
-      socket.emit('emergency-stream',{ action:'gps', meta:{ lat:pos.coords.latitude, lon:pos.coords.longitude } });
-    }, ()=>{});
-  }, 4000);
-  document.getElementById('startEmergencyBtn').disabled=true;
-  document.getElementById('stopEmergencyBtn').disabled=false;
+let emergencyTimer=null;
+document.getElementById('startEmergencyBtn').addEventListener('click', ()=>{
+  log('🚨 Emergency started'); socket.emit('emergency-stream',{ action:'start' });
+  emergencyTimer=setInterval(()=>{ navigator.geolocation.getCurrentPosition(pos=>{ socket.emit('emergency-stream',{ action:'gps', meta:{ lat:pos.coords.latitude, lon:pos.coords.longitude } }); }, ()=>{}); }, 4000);
+  document.getElementById('startEmergencyBtn').disabled=true; document.getElementById('stopEmergencyBtn').disabled=false;
 });
 document.getElementById('stopEmergencyBtn').addEventListener('click', ()=>{
-  if(emergencyTicker) clearInterval(emergencyTicker);
-  socket.emit('emergency-stream',{ action:'stop' });
-  addLog('🛑 Emergency stopped');
-  document.getElementById('startEmergencyBtn').disabled=false;
-  document.getElementById('stopEmergencyBtn').disabled=true;
+  if(emergencyTimer) clearInterval(emergencyTimer); socket.emit('emergency-stream',{ action:'stop' }); log('🛑 Emergency stopped'); document.getElementById('startEmergencyBtn').disabled=false; document.getElementById('stopEmergencyBtn').disabled=true;
 });
 socket.on('emergency-signal', ({from,action,meta})=>{
-  if(action==='start') addLog(`🚨 Emergency from ${from.name}`);
-  if(action==='gps'&&meta) addLog(`GPS from ${from.name}: ${meta.lat.toFixed(5)}, ${meta.lon.toFixed(5)}`);
-  if(action==='stop') addLog(`🛑 Emergency ended by ${from.name}`);
+  if(action==='start') log(`🚨 Emergency from ${from.name}`);
+  if(action==='gps'&&meta){ log(`GPS from ${from.name}: ${meta.lat.toFixed(5)}, ${meta.lon.toFixed(5)}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(meta.lat, meta.lon, from.name+' emergency'); } }
+  if(action==='stop') log(`🛑 Emergency ended by ${from.name}`);
+});
+
+// ---------- WebRTC video conference ----------
+const pcConfig = { iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] };
+const peers = new Map();
+let localStream=null;
+const banner=document.getElementById('vcBanner');
+
+function showBanner(msg){ banner.textContent=msg; banner.style.display='block'; setTimeout(()=>banner.style.display='none', 4000); }
+function addRemoteVideo(peerId, stream){ let el=document.getElementById('rv_'+peerId); if(!el){ el=document.createElement('video'); el.id='rv_'+peerId; el.autoplay=true; el.playsInline=true; document.getElementById('remoteVideos').append(el); } el.srcObject=stream; }
+function removeRemoteVideo(peerId){ const el=document.getElementById('rv_'+peerId); if(el){ if(el.srcObject) el.srcObject.getTracks().forEach(t=>t.stop()); el.remove(); } }
+function ensurePC(peerId){ if(peers.has(peerId)) return peers.get(peerId); const pc=new RTCPeerConnection(pcConfig); pc.onicecandidate=(e)=>{ if(e.candidate) socket.emit('signal',{ to: peerId, data:{ type:'candidate', candidate:e.candidate } }); }; pc.ontrack=(e)=> addRemoteVideo(peerId, e.streams[0]); peers.set(peerId, pc); return pc; }
+
+async function startLocal(){
+  if(localStream) return localStream;
+  const mode=document.getElementById('camMode').value;
+  if(mode==='dual'){
+    const rear = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{exact:'environment'}, width:640, height:480 }, audio:false }).catch(()=>null);
+    const front= await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:640, height:480 }, audio:false }).catch(()=>null);
+    if(rear && front){
+      const vR=document.createElement('video'); vR.srcObject=rear; vR.muted=true; await vR.play().catch(()=>{});
+      const vF=document.createElement('video'); vF.srcObject=front; vF.muted=true; await vF.play().catch(()=>{});
+      const c=document.createElement('canvas'); c.width=640*2; c.height=480; const ctx=c.getContext('2d'); (function draw(){ ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(vR,0,0,640,480); ctx.drawImage(vF,640,0,640,480); requestAnimationFrame(draw); })(); localStream=c.captureStream(24);
+    } else { localStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:640, height:480 }, audio:true }); }
+  } else {
+    const facing = mode==='rear'?{exact:'environment'}:'user';
+    localStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:facing, width:640, height:480 }, audio:true });
+  }
+  document.getElementById('localVideo').srcObject = localStream;
+  return localStream;
+}
+function stopLocal(){ if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null; document.getElementById('localVideo').srcObject=null; } }
+
+async function callPeers(peerIds){
+  const stream = await startLocal();
+  for(const id of peerIds){
+    const pc = ensurePC(id);
+    stream.getTracks().forEach(t=> pc.addTrack(t, stream));
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    socket.emit('signal', { to: id, data: { type: 'offer', sdp: offer } });
+  }
+}
+function hangup(){ peers.forEach((pc,id)=>{ pc.getSenders().forEach(s=>pc.removeTrack(s)); pc.close(); removeRemoteVideo(id); }); peers.clear(); stopLocal(); }
+
+document.getElementById('vcStartBtn').addEventListener('click', ()=>{ socket.emit('vc-start', { roomId: scope.roomId }); document.getElementById('vcStartBtn').disabled=true; document.getElementById('vcStopBtn').disabled=false; });
+document.getElementById('vcStopBtn').addEventListener('click', ()=>{ socket.emit('vc-stop', { roomId: scope.roomId }); hangup(); document.getElementById('vcStartBtn').disabled=false; document.getElementById('vcStopBtn').disabled=true; });
+
+socket.on('vc-started', async ({starterId, roomId, members})=>{ if(starterId!==me?.id) showBanner('📹 Video conference started'); log('Video conference started by '+starterId); if(starterId===me?.id){ await callPeers(members); } });
+socket.on('vc-stopped', ({starterId})=>{ showBanner('📹 Video conference ended'); log('Video conference ended by '+starterId); hangup(); });
+
+socket.on('signal', async ({from, data})=>{
+  const pc = ensurePC(from);
+  if(data.type==='offer'){
+    const stream = await startLocal();
+    stream.getTracks().forEach(t=> pc.addTrack(t, stream));
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+    socket.emit('signal', { to: from, data: { type: 'answer', sdp: ans } });
+  } else if(data.type==='answer'){
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+  } else if(data.type==='candidate'){
+    try{ await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }catch(e){ console.warn(e); }
+  }
 });
 
 // Rooms
@@ -241,7 +257,7 @@ document.getElementById('createRoomBtn').addEventListener('click', ()=>{
 document.getElementById('backToLobbyBtn').addEventListener('click', ()=>{
   if(scope.type==='lobby') return;
   history.replaceState({}, 'Lobby', '/'); socket.emit('switch-room',{ roomId: null });
-  scope = { type:'lobby', roomId:null, name:null }; document.getElementById('scopeBadge').textContent='Lobby'; addLog('Returned to Lobby');
+  scope = { type:'lobby', roomId:null, name:null }; document.getElementById('scopeBadge').textContent='Lobby'; log('Returned to Lobby');
 });
 </script>
 </body>
