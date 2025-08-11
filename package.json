@@ -1,6 +1,6 @@
 {
-  "name": "push-to-talk-patch-v2-fresh",
-  "version": "3.6.1",
+  "name": "push-to-talk-access-ptt-v4",
+  "version": "3.8.0",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
