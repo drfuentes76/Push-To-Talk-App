@@ -1,6 +1,6 @@
 {
-  "name": "push-to-talk-render-fix",
-  "version": "1.0.0",
+  "name": "push-to-talk-final",
+  "version": "5.1.0",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

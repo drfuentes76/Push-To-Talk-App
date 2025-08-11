@@ -3,7 +3,7 @@ services:
     name: push-to-talk-app
     env: node
     plan: free
-    buildCommand: npm install
-    startCommand: node server.js
-    branch: main
+    buildCommand: "npm ci || npm install"
+    startCommand: "node server.js"
     autoDeploy: true
+    healthCheckPath: "/healthz"
