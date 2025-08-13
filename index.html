@@ -117,6 +117,7 @@ function openNativeMaps(lat, lon, label='Location'){
 
 const socket = io({ path:'/socket.io', transports:['websocket','polling'], reconnection:true, reconnectionAttempts: 9999, reconnectionDelay: 500 });
 let me=null; let scope={ type:'lobby', roomId:null, name:null };
+let reconnecting=false; let gpsInterval=null; let isEmergency=false; let lastCoords=null; let lastRoomId=null; let vcActive=false;
 
 document.getElementById('joinForm').addEventListener('submit', e=>{
   e.preventDefault();
@@ -144,7 +145,7 @@ socket.on('room-list', rooms=>{
 socket.on('scope', s=>{
   scope=s; document.getElementById('scopeBadge').textContent = s.type==='lobby' ? 'Lobby' : ('Room: '+s.name);
   if(s.url && location.pathname!==s.url) history.replaceState({}, s.name, s.url);
-  localStorage.setItem('last_room', s.roomId||'');
+  localStorage.setItem('last_room', s.roomId||''); lastRoomId = s.roomId||null;
   log('Switched to '+document.getElementById('scopeBadge').textContent);
 });
 
@@ -179,24 +180,42 @@ socket.on('file-complete', ({fileId})=>{ const e=fileBuffers.get(fileId); if(!e)
 document.getElementById('sendBtn').addEventListener('click', ()=>{ const input=document.getElementById('msgInput'); const text=input.value.trim(); if(!text) return; socket.emit('message',{ roomId: scope.roomId, text }); input.value=''; });
 socket.on('message', ({from,text})=> log(from+': '+text));
 
-// Location / Emergency
-document.getElementById('locationBtn').addEventListener('click', ()=>{
-  navigator.geolocation.getCurrentPosition(pos=>{ socket.emit('location',{ roomId: scope.roomId, lat: pos.coords.latitude, lon: pos.coords.longitude }); }, err=> log('Location error: '+err.message));
-});
-socket.on('location', ({from,lat,lon})=>{ log(`${from} shared location: ${lat.toFixed(5)}, ${lon.toFixed(5)}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(lat,lon, from+"'s location"); } });
+// GPS helpers
+function startGPS(intervalMs=2500, emergency=false){
+  if(gpsInterval) clearInterval(gpsInterval);
+  gpsInterval = setInterval(()=>{
+    navigator.geolocation.getCurrentPosition(pos=>{
+      const payload = { lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now(), acc: pos.coords.accuracy };
+      lastCoords = payload;
+      if(emergency){
+        socket.emit('emergency-stream',{ roomId: scope.roomId, action:'gps', meta: payload });
+      } else {
+        socket.emit('location', Object.assign({ roomId: scope.roomId }, payload));
+      }
+    }, err=> log('Location error: '+err.message));
+  }, intervalMs);
+}
 
-let emergencyTimer=null;
+// Location
+document.getElementById('locationBtn').addEventListener('click', ()=>{
+  startGPS(2500, false);
+  log('Sharing live location every 2–3s…');
+});
+socket.on('location', ({from,lat,lon,ts,acc})=>{ log(`${from} location: ${lat.toFixed(5)}, ${lon.toFixed(5)} (±${acc||0}m) @ ${new Date(ts||Date.now()).toLocaleTimeString()}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(lat,lon, from+"'s location"); } });
+
+// Emergency
 document.getElementById('startEmergencyBtn').addEventListener('click', ()=>{
-  log('🚨 Emergency started'); socket.emit('emergency-stream',{ roomId: scope.roomId, action:'start' });
-  emergencyTimer=setInterval(()=>{ navigator.geolocation.getCurrentPosition(pos=>{ socket.emit('emergency-stream',{ roomId: scope.roomId, action:'gps', meta:{ lat:pos.coords.latitude, lon:pos.coords.longitude } }); }, ()=>{}); }, 4000);
+  log('🚨 Emergency started'); isEmergency=true; socket.emit('emergency-stream',{ roomId: scope.roomId, action:'start' });
+  startGPS(2500, true);
   document.getElementById('startEmergencyBtn').disabled=true; document.getElementById('stopEmergencyBtn').disabled=false;
 });
 document.getElementById('stopEmergencyBtn').addEventListener('click', ()=>{
-  if(emergencyTimer) clearInterval(emergencyTimer); socket.emit('emergency-stream',{ roomId: scope.roomId, action:'stop' }); log('🛑 Emergency stopped'); document.getElementById('startEmergencyBtn').disabled=false; document.getElementById('stopEmergencyBtn').disabled=true;
+  isEmergency=false; if(gpsInterval) clearInterval(gpsInterval);
+  socket.emit('emergency-stream',{ roomId: scope.roomId, action:'stop' }); log('🛑 Emergency stopped'); document.getElementById('startEmergencyBtn').disabled=false; document.getElementById('stopEmergencyBtn').disabled=true;
 });
 socket.on('emergency-signal', ({from,action,meta})=>{
   if(action==='start') log(`🚨 Emergency from ${from.name}`);
-  if(action==='gps'&&meta){ log(`GPS from ${from.name}: ${meta.lat.toFixed(5)}, ${meta.lon.toFixed(5)}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(meta.lat, meta.lon, from.name+' emergency'); } }
+  if(action==='gps'&&meta){ log(`GPS ${from.name}: ${meta.lat.toFixed(5)}, ${meta.lon.toFixed(5)} (±${meta.acc||0}m) @ ${new Date(meta.ts||Date.now()).toLocaleTimeString()}`); if(document.getElementById('autoOpen').checked){ openNativeMaps(meta.lat, meta.lon, from.name+' emergency'); } }
   if(action==='stop') log(`🛑 Emergency ended by ${from.name}`);
 });
 
@@ -318,8 +337,8 @@ async function callPeers(peerIds){
 }
 function hangup(){ peers.forEach((pc,id)=>{ pc.getSenders().forEach(s=>pc.removeTrack(s)); pc.close(); removeRemoteVideo(id); }); peers.clear(); stopLocal(); }
 
-document.getElementById('vcStartBtn').addEventListener('click', ()=>{ socket.emit('vc-start', { roomId: scope.roomId }); document.getElementById('vcStartBtn').disabled=true; document.getElementById('vcStopBtn').disabled=false; });
-document.getElementById('vcStopBtn').addEventListener('click', ()=>{ socket.emit('vc-stop', { roomId: scope.roomId }); hangup(); document.getElementById('vcStartBtn').disabled=false; document.getElementById('vcStopBtn').disabled=true; });
+document.getElementById('vcStartBtn').addEventListener('click', ()=>{ vcActive=true; socket.emit('vc-start', { roomId: scope.roomId }); document.getElementById('vcStartBtn').disabled=true; document.getElementById('vcStopBtn').disabled=false; });
+document.getElementById('vcStopBtn').addEventListener('click', ()=>{ vcActive=false; socket.emit('vc-stop', { roomId: scope.roomId }); hangup(); document.getElementById('vcStartBtn').disabled=false; document.getElementById('vcStopBtn').disabled=true; });
 
 socket.on('vc-started', async ({starterId, roomId, members})=>{ if(starterId!==me?.id) showBanner('📹 Video conference started'); log('Video conference started'); if(starterId===me?.id){ await callPeers(members); }});
 socket.on('vc-stopped', ({starterId})=>{ showBanner('📹 Video conference ended'); log('Video conference ended'); hangup(); });
@@ -337,7 +356,7 @@ socket.on('signal', async ({from, data})=>{
   } else if(data.type==='answer'){
     await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
   } else if(data.type==='candidate'){
-    try{ await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }catch(e){ console.warn(e); }
+    try{ await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }catch(e){ /* ignore */ }
   }
 });
 
@@ -351,6 +370,19 @@ document.getElementById('backToLobbyBtn').addEventListener('click', ()=>{
   history.replaceState({}, 'Lobby', '/'); socket.emit('switch-room',{ roomId: null });
   scope = { type:'lobby', roomId:null, name:null }; document.getElementById('scopeBadge').textContent='Lobby'; log('Returned to Lobby');
 });
+
+// Auto-reconnect restoration
+socket.on('connect', ()=>{
+  if(reconnecting){
+    log('Reconnected');
+    if(lastRoomId){ socket.emit('switch-room',{ roomId: lastRoomId }); }
+    if(isEmergency){ startGPS(2500, true); }
+    else if(gpsInterval){ startGPS(2500, false); }
+    if(vcActive){ socket.emit('vc-start', { roomId: scope.roomId }); }
+  }
+  reconnecting=false;
+});
+socket.on('disconnect', ()=>{ reconnecting=true; });
 </script>
 </body>
 </html>

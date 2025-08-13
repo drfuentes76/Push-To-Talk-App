@@ -68,9 +68,9 @@ io.on('connection', (socket)=>{
   });
 
   // Location & Emergency
-  socket.on('location', ({ roomId, lat, lon }) => {
+  socket.on('location', ({ roomId, lat, lon, ts, acc }) => {
     const u = users.get(socket.id); if (!u) return;
-    io.to(scopeRoom(roomId)).emit('location', { from: u.name, lat, lon });
+    io.to(scopeRoom(roomId)).emit('location', { from: u.name, lat, lon, ts, acc });
   });
   socket.on('emergency-stream', ({ roomId=null, action, meta }) => {
     io.to(scopeRoom(roomId)).emit('emergency-signal', { from: users.get(socket.id), action, meta });
